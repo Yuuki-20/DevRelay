@@ -136,10 +136,18 @@ if ($SessionDir) {
 }
 function Invoke-Checked([string]$FilePath, [string[]]$Arguments, [string]$WorkingDirectory = $Root) {
   Push-Location $WorkingDirectory
+  $previousPreference = $ErrorActionPreference
   try {
+    # Windows PowerShell 5.1 can promote native stderr to NativeCommandError when
+    # ErrorActionPreference=Stop, even if the native process exits successfully.
+    $ErrorActionPreference = "Continue"
     & $FilePath @Arguments 2>&1 | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "$FilePath exited with code $LASTEXITCODE" }
-  } finally { Pop-Location }
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousPreference
+    Pop-Location
+  }
+  if ($code -ne 0) { throw "$FilePath exited with code $code" }
 }
 function Get-LockHash {
   $lockPath = Join-Path $Root "package-lock.json"

@@ -2,6 +2,12 @@
 
 All notable changes to DevRelay are documented here.
 
+## 0.4.3 - 2026-09-28
+
+### Fixed
+
+- Windows PowerShell 5.1 launcher setup no longer aborts a successful `npm ci` or `npm run build` when npm writes notices to stderr. Native stderr is allowed during the command while the launcher still fails on a non-zero native exit code.
+
 ## 0.4.2 - 2026-09-26
 
 ### Changed
