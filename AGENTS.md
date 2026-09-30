@@ -1,6 +1,6 @@
 # DevRelay agent guide
 
-DevRelay is intentionally small. Prefer using existing CLIs through the six MCP process tools over adding domain-specific MCP tools.
+DevRelay is intentionally small. Reuse existing CLIs and compose the existing MCP process primitives before adding domain-specific tools or convenience wrappers.
 
 ## Agent execution guidance
 
@@ -11,7 +11,9 @@ DevRelay is intentionally small. Prefer using existing CLIs through the six MCP 
 
 ## Design rules
 
-- Keep the MCP surface at six tools unless a genuinely new primitive cannot be expressed cleanly through the existing process tools.
+- Keep the MCP surface minimal. Prefer composition of existing generic primitives over adding convenience or domain-specific tools, and do not add a tool merely to wrap an existing CLI operation.
+- Treat the current six-tool surface as sufficient unless a genuinely new primitive cannot be expressed cleanly through the existing process interface.
+- Keep the Windows GUI human-facing: it is the control and observation surface for setup, authorization, lifecycle, settings, and diagnostics. Machine-facing execution belongs to the MCP/process interface.
 - Preserve long-running process support, cursor-based reads, PTY/ConPTY behavior, image attachments, and Windows shell encoding semantics.
 - Keep machine-local state, credentials, logs, caches, and generated files under `internal/.devrelay/` or another ignored local path.
 - Prefer Node.js standard-library APIs and small platform helpers over convenience dependencies.

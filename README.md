@@ -6,7 +6,7 @@ The design rule is simple: **if a task can already be done by a CLI, DevRelay do
 
 ## Status
 
-DevRelay is currently **v0.2.0**. The project targets development use on Windows while keeping the process layer portable to other Node.js platforms.
+DevRelay is under active development. Published GitHub Releases are the supported distribution and automatic-update channel; `main` may contain unreleased changes. The project targets development use on Windows while keeping the process layer portable to other Node.js platforms.
 
 ## Features
 
@@ -19,7 +19,7 @@ DevRelay is currently **v0.2.0**. The project targets development use on Windows
 - Rolling in-memory output buffers.
 - Process-tree termination on Windows.
 - Stable per-device identity with an auto-generated hardware-based default name, editable display name, aliases, and local online metadata.
-- The MCP core has no database, agent loop, general-purpose desktop automation, or embedded tunnel. The Windows launcher UI is a separate local controller.
+- The MCP core has no database, agent loop, general-purpose desktop automation, or embedded tunnel. The Windows launcher GUI is a separate, human-facing control and observation surface for setup, authorization, lifecycle, settings, and diagnostics.
 - Five direct runtime dependencies: the MCP server SDK, its Node adapter, Zod, `iconv-lite` for explicit legacy-code-page decoding, and `node-pty` for PTY/ConPTY.
 
 ## Requirements
@@ -88,7 +88,7 @@ The normal remote-access pattern is to keep DevRelay bound to loopback and place
 | `process_stop` | Stop a managed process tree and forget it. |
 | `process_list` | List processes currently retained by DevRelay. |
 
-There are intentionally no Git, filesystem, Docker, package-manager, or search-specific tools. Use their CLIs through `exec` or `process_start`. Each result identifies the local DevRelay device; `process_list` returns that device plus its locally retained processes.
+There are intentionally no Git, filesystem, Docker, package-manager, or search-specific tools. Use their CLIs through `exec` or `process_start`. The goal is the smallest practical set of generic primitives, not a domain-specific tool for every convenient operation. Each result identifies the local DevRelay device; `process_list` returns that device plus its locally retained processes.
 
 ## Multiple devices
 
@@ -140,7 +140,13 @@ Completed managed processes remain in memory for 10 minutes so their final outpu
 
 ## Development philosophy
 
-DevRelay is infrastructure glue, not a remote IDE and not an autonomous agent. New first-class tools should only be added when ordinary command-line composition cannot provide the same capability cleanly.
+DevRelay is infrastructure glue, not a remote IDE and not an autonomous agent. It brings an MCP client to the development environment instead of recreating that environment inside the MCP server.
+
+Existing command-line tools remain the source of capability. DevRelay provides a small set of generic process primitives for invoking and interacting with them rather than wrapping Git, filesystems, package managers, Docker, search, and other domains in parallel MCP APIs.
+
+**The MCP surface should remain as small as practical.** The goal is not to minimize the tool count for its own sake, but to expose the smallest set of generic primitives that can compose into the required workflows. A new first-class tool is justified only when it represents a genuinely new primitive that cannot be expressed cleanly through the existing interface; convenience for one CLI, ecosystem, or workflow is not enough by itself.
+
+The MCP/process interface is the machine-facing execution path. The Windows GUI is the human-facing control and observation surface for setup, authorization, lifecycle, settings, and diagnostics. DevRelay keeps those roles separate: the GUI is not the execution API, and the MCP core does not absorb responsibilities that already belong to the operating system or existing developer tools.
 
 ## License
 
@@ -150,7 +156,7 @@ Earlier revisions that were published under MIT remain available under the licen
 
 ## Upstream references
 
-The implementation patterns and interoperability references used for v0.1 are documented in [docs/references.md](internal/docs/references.md).
+The upstream implementation patterns and interoperability references used by DevRelay are documented in [docs/references.md](internal/docs/references.md).
 
 ## Automatic release updates
 

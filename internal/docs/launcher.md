@@ -48,7 +48,7 @@ Provider operations happen only after the user presses the corresponding setup b
 
 Reopening `Connection Setup...` while DevRelay is stopped starts the same separate wizard. DevRelay keeps the existing connection while a replacement is being prepared. Once preparation succeeds, the prepared connection is committed before the ChatGPT registration guide is shown; that final guide closes with **Close**.
 
-Local OpenAI/Cloudflare connection files are backed up for the wizard session. Cancel/close restores those local files. Provider-side resources that the user explicitly creates during setup are not silently deleted.
+Local OpenAI/Cloudflare connection files are backed up for the wizard session. Cancel/close before the prepared connection is committed restores those local files. Provider-side resources that the user explicitly creates during setup are not silently deleted.
 
 Advanced Reset removes DevRelay's local connection credentials/configuration. It does not uninstall Tailscale and does not automatically delete remote Tailscale or Cloudflare resources.
 
@@ -73,6 +73,8 @@ For HTTPS providers:
 5. Create / Scan Tools, then approve the OAuth request in the blocking DevRelay approval dialog. The main window is brought forward when a new request arrives.
 
 ## Main control GUI
+
+The GUI is DevRelay's human-facing control and observation surface; MCP remains the machine-facing execution interface. The GUI makes remote access visible and owns setup, authorization, lifecycle, settings, and diagnostics without becoming a second execution API.
 
 The main Settings panel no longer has a `Mode` selector. It shows the current Connection and a `Connection Setup...` button. Port, Auto start, Theme, device name, and aliases remain normal settings.
 

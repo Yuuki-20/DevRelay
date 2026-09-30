@@ -2,6 +2,16 @@
 
 DevRelayは、開発PCのコマンドラインをMCPクライアントから扱うための最小構成のMCPサーバーです。Gitやnpmなどの機能を独自実装せず、既存CLIをそのまま実行する設計です。
 
+## 設計哲学
+
+DevRelayはリモートIDEでも自律エージェントでもなく、開発環境とMCPクライアントをつなぐ薄いインフラです。開発環境をDevRelayの中へ作り直すのではなく、MCPクライアントを既存の開発環境まで連れてくることを目指します。
+
+能力の源は既存CLIです。Git、ファイル操作、パッケージ管理、Docker、検索などを用途別のMCP APIとして再実装せず、少数の汎用process primitiveから組み合わせて使います。
+
+**MCP surfaceは実用上できるだけ小さく保ちます。** ツール数を減らすこと自体が目的ではなく、必要なworkflowを構成できる最小限の汎用primitiveだけを公開することが目的です。既存のprocess interfaceで自然に表現できない新しいprimitiveが必要な場合にだけ、新しいfirst-class toolを検討します。
+
+MCP/process interfaceは機械向けの実行経路です。Windows GUIは人間向けのcontrol/observation surfaceであり、setup、authorization、lifecycle、settings、diagnosticsを見える形で管理します。GUIを実行APIにはせず、両者の役割を分離します。
+
 ## ビルドとテスト
 
 ```powershell
@@ -35,9 +45,9 @@ devrelay --http
 
 `process_write` はstdin/PTY入力とPTYサイズ変更、`process_stop` はセッション停止、`process_list` はDevRelayが保持中のセッション一覧です。通常のMCP結果は重複メタデータを省いたcompact JSONで返し、必要な場合は `detail: "full"` で詳細情報を取得できます。`exec.images` と `process_read.images` を使うと、CLIが生成・参照したPNG/JPEG/WebP/GIFをMCP画像として返せます。
 
-## v0.1で意図的に持たないもの
+## 設計上の非目標
 
-MCPコアにはDB、Git専用API、ファイル専用API、Docker専用API、一般的なGUI自動操作API、組み込みトンネル、LLM/エージェント機能を含めません。PTY/ConPTYと画像返却は、CLIだけでは不足する部分を既存6ツールのオプションとして最小限補完します。WindowsのランチャーGUIはコアとは分離したローカル制御UIです。
+MCPコアにはDB、Git専用API、ファイル専用API、Docker専用API、一般的なGUI自動操作API、組み込みトンネル、LLM/エージェント機能を含めません。PTY/ConPTYと画像返却は、CLIだけでは不足する部分を現在の汎用ツールのオプションとして最小限補完します。WindowsのランチャーGUIはコアとは分離した、人間向けのローカル制御・観測UIです。
 
 ## WindowsではDevRelay.exeを使う
 
@@ -57,7 +67,6 @@ Wizardの最後にはChatGPTへの登録手順も表示します。OpenAI Secure
 一度セットアップした後は、メインSettingsの `Connection Setup...` から同じ別ウィンドウを再度開けます。新しい接続は準備に成功した時点でChatGPT登録ガイドの表示前に確定します。最後のガイドは **Close** だけで閉じます。確定前にCancel/ウィンドウを閉じた場合はWizard中に変更したローカル接続ファイルを復元します。Advanced ResetはDevRelay側の接続設定だけを消し、Tailscaleのアンインストールやprovider側のremote resource削除は自動では行いません。
 
 GUIはOS標準フレームを使わないWPF/WebView2ウィンドウです。本文は `Command log` と `Server log`、中央の区切りはドラッグで比率変更でき、その比率をローカル保存します。赤いStart/Stopと歯車は自前タイトルバーに置きます。ウィンドウは最後の通常サイズを記憶し、最小サイズは480×480です。フォントはNoto Sans Mono、テーマは `#FFFFFF Soft` が既定で、設定から `#000000 Soft` に切り替えられます。GUIを閉じるとDevRelayと現在の接続processも停止します。詳細は [launcher.md](launcher.md) を参照してください。
-
 
 ## 複数デバイス
 

@@ -4,6 +4,8 @@
 
 DevRelay exposes a development machine's existing command-line environment through a very small MCP surface. It avoids duplicating capabilities already present in operating-system and developer CLIs.
 
+The architectural goal is to bring the MCP client to the development environment rather than recreate the development environment inside DevRelay. The MCP/process interface is the machine-facing execution path. The Windows GUI sits outside that execution surface as a local, human-facing control and observation plane for setup, authorization, configuration, lifecycle, and diagnostics.
+
 ```text
 MCP client
    |
@@ -23,7 +25,7 @@ ProcessManager
    +-- bounded OutputBuffer per retained session
 ```
 
-The MCP surface remains six tools. PTY and image return are capabilities of existing tools rather than separate domain APIs.
+The MCP surface remains six tools. PTY and image return are capabilities of existing tools rather than separate domain APIs. The six-tool count is a consequence of the minimum-surface design, not a goal by itself; new tools require a genuinely new primitive that cannot be composed cleanly from the existing process interface.
 
 ## ProcessManager
 

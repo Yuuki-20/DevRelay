@@ -4,6 +4,8 @@ DevRelay intentionally keeps a narrow scope and a small dependency graph.
 
 Before proposing a feature, check whether the same capability can be expressed through an existing command-line tool using `exec` or the managed-process tools. Prefer improving generic process primitives over adding domain-specific MCP tools.
 
+The MCP surface should remain as small as practical. A convenience wrapper around an existing CLI operation is not, by itself, a reason to add a first-class tool: every new tool adds schema, model-selection, compatibility, testing, and documentation cost. Prefer composition unless the proposal introduces a genuinely new primitive.
+
 ## Local verification
 
 ```powershell

@@ -20,8 +20,7 @@ Examples of issues that should be reported privately include:
 
 - bypassing OAuth, local approval, Host/Origin checks, or another intended access-control boundary;
 - causing unauthenticated or unintended remote command execution;
-- leaking stored credentials, OAuth material, tunnel secrets, or command data across trust boundaries;
-- escaping image/file output restrictions to read unrelated local files;
+- leaking stored credentials, OAuth material, tunnel secrets, command data, or other local data across an intended authorization or transport boundary;
 - process isolation or termination behavior that crosses into unrelated processes;
 - updater behavior that accepts non-release code, an unexpected remote, a dirty checkout, or a non-fast-forward update;
 - persistent execution after the visible GUI is closed when the normal lifecycle should have stopped DevRelay.

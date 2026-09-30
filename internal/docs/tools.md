@@ -1,6 +1,8 @@
 # Tool reference
 
-DevRelay keeps exactly six MCP tools. Command results are returned as compact JSON in MCP text content, and `exec` / `process_read` can additionally return requested image files as MCP image content. Compact results identify the local DevRelay by its display name; use `detail: "full"` when the complete device/process metadata is needed.
+DevRelay currently exposes six MCP tools. That count is a consequence of the minimum-surface design rather than a target by itself: generic primitives are preferred over domain-specific convenience wrappers, and a new first-class tool should represent a genuinely new primitive that cannot be composed cleanly from the existing process interface.
+
+Command results are returned as compact JSON in MCP text content, and `exec` / `process_read` can additionally return requested image files as MCP image content. Compact results identify the local DevRelay by its display name; use `detail: "full"` when the complete device/process metadata is needed.
 
 A non-zero command exit code is a normal command result, not an MCP transport error.
 

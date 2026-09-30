@@ -4,9 +4,15 @@
 
 DevRelay exposes generic process primitives instead of dozens of domain tools. Git, ripgrep, npm, Python, Docker, browser automation CLIs, and similar capabilities remain ordinary commands.
 
-## Six tools remain enough
+The intent is to bring the MCP client to the development environment, not to recreate the development environment inside the MCP server. Existing tools remain the source of capability; DevRelay provides the execution path.
 
-One-shot execution uses `exec`. Long-running and interactive work uses `process_start`, `process_read`, `process_write`, and `process_stop`; `process_list` provides discovery. PTY support and image return are options on those existing primitives rather than new MCP tools.
+## Minimum tool surface
+
+DevRelay intentionally keeps its MCP surface small. The goal is not to minimize the tool count for its own sake, but to expose the smallest set of generic primitives that can compose into the required workflows.
+
+The current six-tool surface is expected to remain sufficient unless a genuinely new primitive is identified. One-shot execution uses `exec`. Long-running and interactive work uses `process_start`, `process_read`, `process_write`, and `process_stop`; `process_list` provides discovery. PTY support and image return extend those existing primitives instead of creating separate domain tools.
+
+A new MCP tool should represent a capability that cannot be expressed cleanly through the existing process interface. A shorter or more convenient wrapper around Git, filesystems, package managers, Docker, search, or another existing CLI is not sufficient justification.
 
 ## PTY only where pipes are insufficient
 
@@ -18,13 +24,17 @@ Pipe-based children remain the default because they are simpler and cover most c
 
 DevRelay does not add image browsing or file-management tools. A command can create or locate an image, then `exec.images` or `process_read.images` returns that file as MCP image content. This fills the one gap where stdout alone cannot convey pixels to the MCP client.
 
-## No persistence
+## Managed MCP sessions are not persistent
 
-DevRelay does not attempt to recover or reattach managed processes after its own restart. Persistence would turn the project into a durable process supervisor and require recovery rules and additional state management.
+DevRelay does not attempt to recover or reattach MCP-managed process sessions after its own restart. Making those sessions durable would turn the project into a persistent process supervisor and require recovery semantics that are intentionally out of scope.
 
-## No general-purpose GUI automation
+This does not mean DevRelay is stateless. Machine-local settings, setup state, credentials, logs, diagnostics, window state, and launcher recovery metadata are persisted under `.devrelay` where needed for human control, security, and postmortem diagnosis.
 
-The Windows launcher has a local control GUI so the user can visibly see when remote command access is enabled. That GUI is lifecycle/status UI, not a remote-desktop API.
+## GUI is the human control and observation surface
+
+The Windows launcher GUI exists for the human operator. It makes remote command access visible and provides explicit controls for setup, authorization, lifecycle, settings, and diagnostics.
+
+The MCP/process interface is the machine-facing execution path; the GUI is the human-facing control and observation surface. DevRelay keeps those responsibilities separate. The GUI is not the execution API and is not a remote-desktop interface.
 
 DevRelay intentionally does not expose mouse, keyboard, window-focus, screenshot, or arbitrary desktop-control MCP tools. Browser automation and screenshot generation should use existing CLIs where practical.
 
