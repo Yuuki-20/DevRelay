@@ -25,6 +25,18 @@ test("tracked process matching rejects PID reuse and wrong command lines", () =>
   assert.equal(trackedProcessMatches(record, actual, { internalRoot }), true);
   assert.equal(trackedProcessMatches(record, { ...actual, creationDate: "2026-09-25T02:00:00.000Z" }, { internalRoot }), false);
   assert.equal(trackedProcessMatches(record, { ...actual, commandLine: "node.exe other.js --port 7317" }, { internalRoot }), false);
+
+  const linuxTunnelRecord = {
+    role: "tunnel", pid: 43, startedAt: "2026-09-25T01:00:00.000Z",
+    executableName: "cloudflared-linux-amd64", executablePath: "/home/user/.devrelay/tools/cloudflared/cloudflared-linux-amd64",
+    commandIncludes: ["tunnel", "--url"]
+  };
+  const linuxTunnelProcess = {
+    processId: 43, name: "cloudflared", creationDate: "2026-09-25T01:00:01.000Z",
+    executablePath: linuxTunnelRecord.executablePath,
+    commandLine: "/home/user/.devrelay/tools/cloudflared/cloudflared-linux-amd64 tunnel --url http://127.0.0.1:7317"
+  };
+  assert.equal(trackedProcessMatches(linuxTunnelRecord, linuxTunnelProcess, { internalRoot }), true);
 });
 
 test("session ownership includes tracked processes and legacy cloudflared logfile ownership", () => {

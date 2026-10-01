@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,7 +15,7 @@ function challenge(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
-async function withOAuthServer(run: (base: string, oauth: DevRelayOAuthServer) => Promise<void>): Promise<void> {
+async function withOAuthServer(run: (base: string, oauth: DevRelayOAuthServer, stateDir: string) => Promise<void>): Promise<void> {
   const stateDir = await mkdtemp(path.join(tmpdir(), "devrelay-oauth-"));
   const oauth = await DevRelayOAuthServer.create({
     issuer: ISSUER, resource: RESOURCE, stateDir, controlSecret: "local-control-secret"
@@ -31,7 +31,7 @@ async function withOAuthServer(run: (base: string, oauth: DevRelayOAuthServer) =
   assert.ok(address && typeof address === "object");
   const base = `http://127.0.0.1:${address.port}`;
   try {
-    await run(base, oauth);
+    await run(base, oauth, stateDir);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(stateDir, { recursive: true, force: true });
@@ -50,6 +50,63 @@ test("OAuth protected resource metadata supports the MCP resource path", async (
     }
   });
 });
+
+test("unknown OAuth clients get connection recovery guidance", async () => {
+  await withOAuthServer(async (base) => {
+    const response = await fetch(`${base}/oauth/authorize?client_id=drc_missing&response_type=code`);
+    assert.equal(response.status, 400);
+    const error = await response.json() as { error: string; error_description: string };
+    assert.equal(error.error, "unauthorized_client");
+    assert.match(error.error_description, /Remove and add the MCP connection again/);
+    assert.match(error.error_description, /\.devrelay\/oauth/);
+  });
+});
+
+test("a lost DevRelay DCR registration is restored after validating authorization", async () => {
+  await withOAuthServer(async (base, _oauth, stateDir) => {
+    const clientId = `drc_${"a".repeat(32)}`;
+    const verifier = randomBytes(48).toString("base64url");
+    const authorize = new URL(`${base}/oauth/authorize`);
+    authorize.searchParams.set("response_type", "code");
+    authorize.searchParams.set("client_id", clientId);
+    authorize.searchParams.set("redirect_uri", REDIRECT);
+    authorize.searchParams.set("scope", "devrelay offline_access");
+    authorize.searchParams.set("resource", RESOURCE);
+    authorize.searchParams.set("code_challenge", challenge(verifier));
+    authorize.searchParams.set("code_challenge_method", "S256");
+
+    const response = await fetch(authorize);
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /ChatGPT \(recovered\)/);
+
+    const registrations = JSON.parse(await readFile(path.join(stateDir, "oauth", "clients.json"), "utf8")) as Array<{
+      clientId: string; redirectUris: string[]; clientName: string; createdAt: number;
+    }>;
+    assert.equal(registrations.length, 1);
+    assert.equal(registrations[0]?.clientId, clientId);
+    assert.deepEqual(registrations[0]?.redirectUris, [REDIRECT]);
+    assert.equal(registrations[0]?.clientName, "ChatGPT (recovered)");
+    assert.equal(typeof registrations[0]?.createdAt, "number");
+
+    const hostileRedirect = new URL(authorize);
+    hostileRedirect.searchParams.set("client_id", `drc_${"b".repeat(32)}`);
+    hostileRedirect.searchParams.set("redirect_uri", "https://attacker.example/callback");
+    const rejectedRedirect = await fetch(hostileRedirect);
+    assert.equal(rejectedRedirect.status, 400);
+    assert.equal((await rejectedRedirect.json() as { error: string }).error, "unauthorized_client");
+
+    const invalidPkce = new URL(authorize);
+    invalidPkce.searchParams.set("client_id", `drc_${"c".repeat(32)}`);
+    invalidPkce.searchParams.set("code_challenge", "not-a-valid-challenge");
+    const rejectedPkce = await fetch(invalidPkce);
+    assert.equal(rejectedPkce.status, 400);
+    assert.equal((await rejectedPkce.json() as { error: string }).error, "invalid_request");
+
+    const afterRejections = JSON.parse(await readFile(path.join(stateDir, "oauth", "clients.json"), "utf8")) as Array<{ clientId: string }>;
+    assert.deepEqual(afterRejections.map((registration) => registration.clientId), [clientId]);
+  });
+});
+
 test("OAuth DCR + PKCE + refresh flow", async () => {
   await withOAuthServer(async (base, oauth) => {
     const metadata = await fetch(`${base}/.well-known/oauth-authorization-server`).then((response) => response.json());

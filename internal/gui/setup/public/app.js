@@ -229,14 +229,19 @@ function renderTailscale() {
         ${providerLine("DNS name", ps.tailscaleDnsName || "-")}
       </div>
       <div class="actions">
-        <button id="installTailscale" class="button secondary" type="button" ${ps.tailscaleInstalled ? "disabled" : ""}>Install Tailscale</button>
+        ${state.platform === "linux"
+          ? `<button id="installTailscale" class="button secondary" type="button" ${ps.tailscaleInstalled ? "disabled" : ""}>Linux install instructions</button>`
+          : `<button id="installTailscale" class="button secondary" type="button" ${ps.tailscaleInstalled ? "disabled" : ""}>Install Tailscale</button>`}
         <button id="loginTailscale" class="button secondary" type="button" ${!ps.tailscaleInstalled || ps.tailscaleLoggedIn ? "disabled" : ""}>Sign in</button>
         <button id="refreshTailscale" class="button secondary" type="button">Check status</button>
         <button id="prepareTailscale" class="button primary" type="button" ${!ps.tailscaleLoggedIn ? "disabled" : ""}>Prepare</button>
       </div>
       ${ready ? `<div class="check-row"><span class="mark">OK</span><span>${escapeHtml(connectionEndpoint(state.draft))}</span></div>` : ""}
     </div>`;
-  $("#installTailscale")?.addEventListener("click", async () => { if (await action("install-tailscale")) await refresh(); });
+  $("#installTailscale")?.addEventListener("click", async () => {
+    if (state.platform === "linux") await perform("/api/open-link", { method: "POST", body: JSON.stringify({ target: "tailscale-install" }) });
+    else if (await action("install-tailscale")) await refresh();
+  });
   $("#loginTailscale")?.addEventListener("click", async () => { if (await action("tailscale-login")) await refresh(); });
   $("#refreshTailscale")?.addEventListener("click", async () => { if (await perform("/api/recheck", { method: "POST", body: "{}" })) render(); });
   $("#prepareTailscale")?.addEventListener("click", async () => { if (await action("tailscale-prepare")) setPage("guide"); });

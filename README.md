@@ -6,7 +6,7 @@ The design rule is simple: **if a task can already be done by a CLI, DevRelay do
 
 ## Status
 
-DevRelay is under active development. Published GitHub Releases are the supported distribution and automatic-update channel; `main` may contain unreleased changes. The project targets development use on Windows while keeping the process layer portable to other Node.js platforms.
+DevRelay is under active development. Published GitHub Releases are the supported distribution and automatic-update channel; `main` may contain unreleased changes. Windows remains the supported release target. Linux support is being implemented; it is not yet a supported release target.
 
 ## Features
 
@@ -17,10 +17,10 @@ DevRelay is under active development. Published GitHub Releases are the supporte
 - Managed long-running pipe processes plus opt-in PTY/ConPTY terminal sessions.
 - Cursor-based incremental log reads.
 - Rolling in-memory output buffers.
-- Process-tree termination on Windows.
+- Process-tree termination for managed Windows and Linux processes.
 - Stable per-device identity with an auto-generated hardware-based default name, editable display name, aliases, and local online metadata.
-- The MCP core has no database, agent loop, general-purpose desktop automation, or embedded tunnel. The Windows launcher GUI is a separate, human-facing control and observation surface for setup, authorization, lifecycle, settings, and diagnostics.
-- Five direct runtime dependencies: the MCP server SDK, its Node adapter, Zod, `iconv-lite` for explicit legacy-code-page decoding, and `node-pty` for PTY/ConPTY.
+- The MCP core has no database, agent loop, general-purpose desktop automation, or embedded tunnel. A separate Node/Electron GUI provides the human-facing control and observation surface for setup, authorization, lifecycle, settings, and diagnostics.
+- The MCP core has five direct runtime dependencies: the MCP server SDK, its Node adapter, Zod, `iconv-lite` for explicit legacy-code-page decoding, and `node-pty` for PTY/ConPTY. The desktop GUI also uses Electron for its native window host.
 
 ## Requirements
 
@@ -32,8 +32,8 @@ The MCP Inspector v2 currently requires a newer Node 22 release; DevRelay itself
 
 ## Build
 
-```powershell
-cd .\internal
+```sh
+cd internal
 npm install
 npm run build
 npm test
@@ -146,7 +146,7 @@ Existing command-line tools remain the source of capability. DevRelay provides a
 
 **The MCP surface should remain as small as practical.** The goal is not to minimize the tool count for its own sake, but to expose the smallest set of generic primitives that can compose into the required workflows. A new first-class tool is justified only when it represents a genuinely new primitive that cannot be expressed cleanly through the existing interface; convenience for one CLI, ecosystem, or workflow is not enough by itself.
 
-The MCP/process interface is the machine-facing execution path. The Windows GUI is the human-facing control and observation surface for setup, authorization, lifecycle, settings, and diagnostics. DevRelay keeps those roles separate: the GUI is not the execution API, and the MCP core does not absorb responsibilities that already belong to the operating system or existing developer tools.
+The MCP/process interface is the machine-facing execution path. The Electron GUI is the human-facing control and observation surface for setup, authorization, lifecycle, settings, and diagnostics. DevRelay keeps those roles separate: the GUI is not the execution API, and the MCP core does not absorb responsibilities that already belong to the operating system or existing developer tools.
 
 ## License
 
@@ -166,7 +166,7 @@ An update is applied only when the checkout uses the official DevRelay `origin`,
 
 ## Windows double-click launcher
 
-For normal Windows use, double-click `DevRelay.exe`. `DevRelay.cmd` remains available as a compatibility fallback. Before the main control window starts, DevRelay checks the latest published Release and then verifies machine-local connection setup. On launch, DevRelay also creates or refreshes a per-user Start Menu shortcut with the same AppUserModelID as the WPF windows so the app can be pinned to the taskbar as DevRelay rather than PowerShell.
+For normal Windows use, double-click `DevRelay.exe`. `DevRelay.cmd` remains available as a compatibility fallback. Before the main control window starts, DevRelay checks the latest published Release and then verifies machine-local connection setup. The Electron window uses the DevRelay AppUserModelID so it can be pinned to the taskbar as DevRelay.
 
 A fresh install opens a separate light-theme **DevRelay Setup** window before the main GUI. Connection setup is chosen there rather than through a `Mode` field in the main window:
 
@@ -179,7 +179,7 @@ The wizard also shows the ChatGPT registration steps. Secure Tunnel uses a Tunne
 
 After setup, the main GUI shows the current Connection and endpoint. `Connection Setup...` reopens the separate wizard while DevRelay is stopped. The current connection stays active while a replacement is being prepared; once preparation succeeds, the new connection is committed before the ChatGPT registration guide appears. Cancel/close before that point restores the previous local connection files. Advanced Reset removes DevRelay's local connection configuration but does not uninstall Tailscale or automatically delete provider-side tunnel resources.
 
-The GUI stays visible while DevRelay is available. The body contains `Command log` and `Server log`, with a draggable divider whose ratio is remembered locally. Start/Stop and Settings live in the custom title bar. The window remembers its last normal size, supports a 480x480 minimum, and uses Noto Sans Mono with the `#FFFFFF Soft` (default) and `#000000 Soft` palettes. Device/port/auto-start settings can be edited while stopped; an incoming HTTPS OAuth authorization request brings the main window forward and shows a blocking approval dialog over the app. Closing the GUI stops DevRelay and its active connection process.
+The GUI stays visible while DevRelay is available. The body contains `Command log` and `Server log`, with a draggable divider whose ratio is remembered locally. Start/Stop and Settings stay in the app toolbar beneath the native window title bar. The window remembers its size and supports a 480x480 minimum. It uses Noto Sans Mono when available, with `#FFFFFF Soft` (default) and `#000000 Soft` palettes. Device/port/auto-start settings can be edited while stopped. An incoming HTTPS OAuth request shows a blocking approval dialog; on Wayland, the desktop may prevent an app from taking focus, so DevRelay also sends a desktop notification. Closing the GUI stops DevRelay and its active connection process.
 
 Each visible window launch writes a session under `internal/.devrelay/logs/`; session diagnostics include server/command logs plus controller/launcher lifecycle and process-identity records used to diagnose and safely recover unclean exits. The latest three sessions are retained, plus up to five recent unclean/diagnostic sessions for postmortem analysis. Machine-local settings, setup state, caches, logs, provider state, window state, and credentials remain under `.devrelay` and are excluded from Git.
 

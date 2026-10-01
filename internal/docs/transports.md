@@ -20,13 +20,13 @@ node dist/src/main.js --http --host 127.0.0.1 --port 7317
 
 The MCP endpoint is `http://127.0.0.1:7317/mcp`. Loopback bindings use the MCP SDK's localhost Host and Origin validation helpers.
 
-## Windows connection providers
+## Connection providers
 
-The Windows launcher keeps the MCP server on loopback and supervises a selected remote-access provider from `.devrelay/setup.json`. The main GUI does not expose a connection Mode selector; connection selection and provider setup live in the separate Connection Setup wizard.
+The desktop launcher keeps the MCP server on loopback and supervises a selected remote-access provider from `.devrelay/setup.json`. The main GUI does not expose a connection Mode selector; connection selection and provider setup live in the separate Connection Setup wizard. Linux provider orchestration is implemented in Node.js; Windows retains PowerShell for Windows-specific installation and credential storage.
 
 ### OpenAI Secure Tunnel
 
-The official OpenAI `tunnel-client` connects outbound to OpenAI and forwards the local MCP endpoint without requiring a public hostname. DevRelay stores the selected tunnel ID in machine-local setup files and the runtime API key using Windows DPAPI.
+The official OpenAI `tunnel-client` connects outbound to OpenAI and forwards the local MCP endpoint without requiring a public hostname. DevRelay stores the selected tunnel ID in machine-local setup files. Windows protects the runtime API key with DPAPI; Linux stores it in a mode-0600 file under the user-only `.devrelay` directory.
 
 The wizard prepares a `sample_mcp_remote_no_auth` profile. At runtime DevRelay starts the local MCP listener first, then runs `tunnel-client doctor --explain` before starting the tunnel. The runtime worker remains non-interactive and refuses to prompt for missing credentials.
 
@@ -38,9 +38,11 @@ All HTTPS providers terminate public TLS outside DevRelay and forward to the loo
 
 The public issuer/resource values are set by the runtime worker after the provider's actual public URL is known. A public browser authorization page cannot approve access by itself: the request must be approved in the visible local DevRelay GUI through a per-runtime local control secret.
 
+After a machine migration, DevRelay can reconstruct a missing DCR client registration from a valid prior DevRelay client ID during a fully validated authorization request. This keeps the same ChatGPT connection usable while preserving local approval. Missing refresh-token state still requires a new authorization.
+
 #### Tailscale Funnel
 
-Tailscale Funnel is the recommended HTTPS provider for users without a custom domain. Setup can download/run the official Windows Tailscale installer when needed, then relies on the normal Tailscale browser sign-in flow. The prepared endpoint uses the machine's stable tailnet DNS name under `*.ts.net`.
+Tailscale Funnel is the recommended HTTPS provider for users without a custom domain. Windows setup can run the official Tailscale installer when needed. Linux users install the official package for their distribution before setup; both platforms use the normal Tailscale browser sign-in flow. The prepared endpoint uses the machine's stable tailnet DNS name under `*.ts.net`.
 
 At runtime DevRelay supervises the Funnel process with the local HTTP listener. Provider-specific account/policy requirements remain Tailscale-controlled, so live interoperability should be validated with the target tailnet.
 

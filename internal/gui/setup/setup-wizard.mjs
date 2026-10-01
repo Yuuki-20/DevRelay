@@ -1,9 +1,11 @@
 import http from "node:http";
 import { spawn, execFile } from "node:child_process";
-import { readFile, cp, rm, mkdir, access, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { readFile, cp, rm, mkdir, access, writeFile, chmod } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import { electronSpawnEnvironment } from "../electron-environment.mjs";
 import {
   connectionLabel,
   connectionPublicUrl,
@@ -13,26 +15,27 @@ import {
 } from "./setup-state.mjs";
 import { extractCloudflareApprovalUrl, extractTailscaleApprovalUrl, isTrustedSetupApprovalUrl } from "./tailscale-setup.mjs";
 import { waitForPublicOAuthReady } from "./registration-readiness.mjs";
+import { openExternalUrl } from "../open-external.mjs";
 
 const setupDir = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const electronPath = require("electron");
 const guiDir = path.resolve(setupDir, "..");
 const internalRoot = path.resolve(guiDir, "..");
 const publicDir = path.join(setupDir, "public");
 const stateDir = path.join(internalRoot, ".devrelay");
 const setupPort = 7319;
-const hostDir = path.join(guiDir, "host");
-const hostSetupPath = path.join(hostDir, "Ensure-WebView2Sdk.ps1");
-const fontSetupPath = path.join(hostDir, "Ensure-NotoSansMono.ps1");
-const hostScriptPath = path.join(hostDir, "DevRelay-GuiHost.ps1");
-const webView2Root = path.join(stateDir, "webview2-sdk");
-const fontRoot = path.join(stateDir, "fonts");
-const profileDir = path.join(stateDir, "setup-webview2-profile");
+const electronHostPath = path.join(guiDir, "electron-host.cjs");
 const windowStatePath = path.join(stateDir, "setup-window-state.json");
-const mainWindowStatePath = path.join(stateDir, "window-state.json");
 const setupActionsPath = path.join(internalRoot, "scripts", "DevRelay-SetupActions.ps1");
+const providerActionsPath = path.join(setupDir, "provider-actions-cli.mjs");
 const settingsPath = path.join(stateDir, "gui-settings.json");
 const mainGuiPath = path.join(guiDir, "devrelay-gui.mjs");
 const mainGuiOrigin = "http://127.0.0.1:7318";
+
+if (process.platform !== "win32" && process.platform !== "linux") {
+  throw new Error(`The DevRelay setup GUI currently supports Windows and Linux, not ${process.platform}.`);
+}
 
 let currentSetup = await ensureSetupState(internalRoot);
 let draftConnection = currentSetup.connection ? structuredClone(currentSetup.connection) : null;
@@ -51,7 +54,7 @@ let approvalUrl = null;
 let registrationRuntime = null;
 
 const backupRoot = path.join(stateDir, "setup-backups", randomUUID());
-const backupEntries = ["launcher.json", "control-plane-api-key.dpapi", "tunnel-profiles", "cloudflare-named.json", "https-named.json", "cloudflare"];
+const backupEntries = ["launcher.json", "control-plane-api-key.dpapi", "control-plane-api-key", "tunnel-profiles", "cloudflare-named.json", "https-named.json", "cloudflare"];
 let transactionCommitted = false;
 
 async function exists(filePath) {
@@ -88,6 +91,7 @@ async function commitConnectionBackup() {
 }
 
 await createConnectionBackup();
+if (process.platform !== "win32") await chmod(stateDir, 0o700).catch(() => {});
 
 async function loadPort() {
   try {
@@ -96,18 +100,9 @@ async function loadPort() {
   } catch { return 7317; }
 }
 
-function execFilePromise(file, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    execFile(file, args, { windowsHide: true, maxBuffer: 4_000_000, ...options }, (error, stdout, stderr) => {
-      if (error) reject(new Error(String(stderr || stdout || error.message).trim()));
-      else resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
-    });
-  });
-}
-
 async function openSetupApproval(url) {
   if (!isTrustedSetupApprovalUrl(url)) throw new Error("Refused an untrusted setup approval URL.");
-  await execFilePromise("rundll32.exe", ["url.dll,FileProtocolHandler", new URL(url).href]);
+  await openExternalUrl(new URL(url).href);
 }
 
 async function readMainGuiState() {
@@ -118,26 +113,27 @@ async function readMainGuiState() {
   } catch { return null; }
 }
 
-async function waitForMainGui(timeoutMs = 15000) {
+async function waitForMainGui(timeoutMs = 15000, requireWindowReady = false) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const state = await readMainGuiState();
-    if (state) return state;
+    if (state && (!requireWindowReady || state.windowReady)) return state;
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error("DevRelay main window did not start in time.");
+  throw new Error(requireWindowReady
+    ? "DevRelay main window did not become ready in time."
+    : "DevRelay main window did not start in time.");
 }
 
 async function startMainGuiForRegistration() {
   let mainState = await readMainGuiState();
   if (!mainState) {
     const child = spawn(process.execPath, [mainGuiPath], {
-      cwd: internalRoot, windowsHide: true, detached: true, stdio: "ignore",
-      env: { ...process.env, DEVRELAY_CASCADE_WINDOW: "1" }
+      cwd: internalRoot, windowsHide: true, detached: true, stdio: "ignore"
     });
     child.unref();
-    mainState = await waitForMainGui();
   }
+  mainState = await waitForMainGui(15000, true);
 
   const startResponse = await fetch(`${mainGuiOrigin}/api/start`, {
     method: "POST",
@@ -180,13 +176,12 @@ async function runSetupAction(action, input = undefined, options = {}) {
   const inputPath = input === undefined ? null : path.join(stateDir, `setup-input-${randomUUID()}.json`);
   if (inputPath) await writeFile(inputPath, JSON.stringify(input), { encoding: "utf8", mode: 0o600 });
   return await new Promise((resolve, reject) => {
-    const args = [
-      "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
-      "-File", setupActionsPath, "-Action", action, "-Port", String(port)
-    ];
-    if (inputPath) args.push("-InputPath", inputPath);
-    const child = spawn("powershell.exe", args, {
-      cwd: internalRoot, windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
+    const useNodeActions = process.platform === "linux";
+    const args = useNodeActions
+      ? [providerActionsPath, action, String(port), inputPath ?? ""]
+      : ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", setupActionsPath, "-Action", action, "-Port", String(port), ...(inputPath ? ["-InputPath", inputPath] : [])];
+    const child = spawn(useNodeActions ? process.execPath : "powershell.exe", args, {
+      cwd: internalRoot, windowsHide: true, detached: useNodeActions, stdio: ["ignore", "pipe", "pipe"]
     });
     activeSetupChild = child;
     let stdout = "";
@@ -239,13 +234,14 @@ const linkTargets = {
   "openai-tunnels": "https://platform.openai.com/settings/organization/tunnels",
   "openai-api-keys": "https://platform.openai.com/settings/organization/api-keys",
   "openai-issue-71": "https://github.com/openai/tunnel-client/issues/71",
-  "chatgpt-settings": "https://chatgpt.com/#settings/Connectors"
+  "chatgpt-settings": "https://chatgpt.com/#settings/Connectors",
+  "tailscale-install": "https://tailscale.com/kb/1031/install-linux"
 };
 
 async function openLink(target) {
   const url = linkTargets[target];
   if (!url) throw new Error("Unknown link target.");
-  await execFilePromise("cmd.exe", ["/d", "/c", "start", "", url]);
+  await openExternalUrl(url);
 }
 
 function sendJson(res, status, value) {
@@ -283,6 +279,7 @@ async function apiState() {
     busyNeedsUser,
     approvalUrl,
     registrationRuntime,
+    platform: process.platform,
     error: lastError
   };
 }
@@ -302,7 +299,13 @@ async function serveStatic(req, res, url) {
   }
   try {
     const body = await readFile(filePath);
-    res.writeHead(200, { "content-type": contentType(filePath), "cache-control": "no-store" });
+    res.writeHead(200, {
+      "content-type": contentType(filePath),
+      "cache-control": "no-store",
+      "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "no-referrer"
+    });
     res.end(body);
   } catch { res.writeHead(404).end(); }
 }
@@ -417,6 +420,17 @@ async function handleAction(body) {
 }
 
 function taskkill(pid) {
+  if (process.platform !== "win32") {
+    try { process.kill(-pid, "SIGTERM"); } catch (error) {
+      try { process.kill(pid, "SIGTERM"); } catch (inner) {
+        return Promise.resolve({ ok: inner.code === "ESRCH", error: inner.code === "ESRCH" ? null : inner.message });
+      }
+    }
+    return new Promise((resolve) => setTimeout(() => {
+      try { process.kill(-pid, "SIGKILL"); } catch {}
+      resolve({ ok: true, error: null });
+    }, 500));
+  }
   return new Promise((resolve) => {
     execFile("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, () => resolve());
   });
@@ -500,27 +514,21 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-function runPowerShellFile(filePath, args = []) {
-  return new Promise((resolve, reject) => {
-    const child = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", filePath, ...args], {
-      cwd: internalRoot, windowsHide: true, stdio: "ignore"
-    });
-    child.once("error", reject);
-    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`${path.basename(filePath)} exited with code ${code ?? "?"}.`)));
-  });
-}
-
 async function launchWindow() {
-  await runPowerShellFile(hostSetupPath, ["-Root", webView2Root]);
-  await runPowerShellFile(fontSetupPath, ["-Root", fontRoot]);
   const url = `http://127.0.0.1:${setupPort}/`;
   const hostArgs = [
-    "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-File", hostScriptPath,
-    "-Url", url, "-SdkRoot", webView2Root, "-ProfileDir", profileDir, "-WindowStatePath", windowStatePath,
-    "-Title", "DevRelay Setup", "-SetupMode", "-InitialWidth", "760", "-InitialHeight", "620", "-MinimumWidth", "560", "-MinimumHeight", "480"
+    electronHostPath,
+    "--devrelay-url", url,
+    "--devrelay-mode", "setup",
+    "--devrelay-title", "DevRelay Setup",
+    "--devrelay-window-state", windowStatePath,
+    "--devrelay-user-data", path.join(stateDir, "electron-setup-profile"),
+    "--devrelay-width", "760", "--devrelay-height", "620",
+    "--devrelay-min-width", "560", "--devrelay-min-height", "480"
   ];
-  if (process.env.DEVRELAY_CASCADE_WINDOW === "1") hostArgs.push("-CascadeFromStatePath", mainWindowStatePath);
-  windowHost = spawn("powershell.exe", hostArgs, { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
+  windowHost = spawn(electronPath, hostArgs, {
+    cwd: internalRoot, detached: process.platform !== "win32", env: electronSpawnEnvironment(), stdio: "ignore"
+  });
   windowHost.once("exit", () => { windowHost = null; if (!shuttingDown) void shutdown(); });
   windowHost.once("error", () => { if (!shuttingDown) void shutdown(); });
 }

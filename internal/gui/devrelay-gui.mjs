@@ -1,32 +1,31 @@
 import http from "node:http";
 import { spawn, execFile } from "node:child_process";
+import { createRequire } from "node:module";
 import { appendFileSync } from "node:fs";
-import { readFile, writeFile, mkdir, readdir, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, rm, chmod } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { electronSpawnEnvironment } from "./electron-environment.mjs";
 import { connectionLabel, connectionPublicUrl, ensureSetupState } from "./setup/setup-state.mjs";
 import { classifyGuiHostHeartbeat, isGuiHostRecoverySignal, shouldResumeRuntimeAfterGuiRecovery } from "./gui-host-watchdog.mjs";
 import { queryRecentWindowsEvents, queryWindowsProcesses, recoverUncleanSessions } from "./session-recovery.mjs";
 
 const guiDir = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const electronPath = require("electron");
 const internalRoot = path.resolve(guiDir, "..");
 const publicDir = path.join(guiDir, "public");
 const stateDir = path.join(internalRoot, ".devrelay");
 const windowStatePath = path.join(stateDir, "window-state.json");
-const setupWindowStatePath = path.join(stateDir, "setup-window-state.json");
 const settingsPath = path.join(stateDir, "gui-settings.json");
 const devicePath = path.join(stateDir, "device.json");
 const updateStatePath = path.join(stateDir, "update-state.json");
 const launcherPath = path.join(internalRoot, "scripts", "DevRelay-Launcher.ps1");
+const linuxLauncherPath = path.join(guiDir, "linux-runtime.mjs");
 const setupWizardPath = path.join(guiDir, "setup", "setup-wizard.mjs");
 const guiPort = 7318;
-const hostDir = path.join(guiDir, "host");
-const hostSetupPath = path.join(hostDir, "Ensure-WebView2Sdk.ps1");
-const fontSetupPath = path.join(hostDir, "Ensure-NotoSansMono.ps1");
-const hostScriptPath = path.join(hostDir, "DevRelay-GuiHost.ps1");
-const webView2Root = path.join(stateDir, "webview2-sdk");
-const fontRoot = path.join(stateDir, "fonts");
+const electronHostPath = path.join(guiDir, "electron-host.cjs");
 const logsRoot = path.join(stateDir, "logs");
 const CONTROLLER_HEARTBEAT_INTERVAL_MS = 120_000;
 const controllerStartedAt = new Date().toISOString();
@@ -42,15 +41,19 @@ async function existingGuiIsRunning() {
   });
 }
 if (await existingGuiIsRunning()) process.exit(0);
+if (process.platform !== "win32" && process.platform !== "linux") {
+  throw new Error(`The DevRelay desktop GUI currently supports Windows and Linux, not ${process.platform}.`);
+}
 
 await mkdir(stateDir, { recursive: true });
+if (process.platform !== "win32") await chmod(stateDir, 0o700).catch(() => {});
 await mkdir(logsRoot, { recursive: true });
 const recoveredSessions = await recoverUncleanSessions({ logsRoot, internalRoot });
 
 let setup = await ensureSetupState(internalRoot);
 if (!setup.completed) {
   await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [setupWizardPath], { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
+    const child = spawn(process.execPath, [setupWizardPath], { cwd: internalRoot, windowsHide: true, detached: process.platform !== "win32", stdio: "ignore" });
     child.once("error", reject);
     child.once("exit", () => resolve());
   });
@@ -140,6 +143,7 @@ function setRuntimeDesiredRunning(value, source) {
 function handleGuiHostSignal() {
   const now = Date.now();
   const previousAt = lastHostHeartbeatAt;
+  if (previousAt > 0 && now - previousAt < CONTROLLER_HEARTBEAT_INTERVAL_MS) return;
   const previousStatus = lastHostHeartbeatStatus;
   const gapMs = previousAt > 0 ? Math.max(0, now - previousAt) : 0;
   const recovered = previousAt > 0 && isGuiHostRecoverySignal({ previousStatus, gapMs });
@@ -375,11 +379,10 @@ async function startRuntime(reason = "user") {
   }
   publicUrl = connectionPublicUrl(setup.connection);
 
-  const args = [
-    "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
-    "-File", launcherPath,
-    "-Port", String(settings.port)
-  ];
+  const launcherExe = process.platform === "win32" ? "powershell.exe" : process.execPath;
+  const launcherArgs = process.platform === "win32"
+    ? ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcherPath, "-Port", String(settings.port)]
+    : [linuxLauncherPath, String(settings.port)];
 
   const usesOAuth = setup.connection.kind === "https";
   oauthControlSecret = usesOAuth ? `${randomUUID()}${randomUUID()}`.replaceAll("-", "") : null;
@@ -390,16 +393,21 @@ async function startRuntime(reason = "user") {
   } : {};
   pushLog(pluginLogs, `[GUI] Starting ${connectionLabel(setup.connection)}...`);
   const launcherStartedAt = new Date().toISOString();
-  runtime = spawn("powershell.exe", args, {
+  runtime = spawn(launcherExe, launcherArgs, {
     cwd: internalRoot,
-    windowsHide: true,
+    windowsHide: process.platform === "win32",
+    detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env, DEVRELAY_STATE_DIR: stateDir, ...oauthEnv, DEVRELAY_AUDIT_LOG: auditPath, DEVRELAY_SESSION_DIR: sessionDir,
       DEVRELAY_SESSION_ID: sessionId, DEVRELAY_CONTROLLER_PID: String(process.pid), DEVRELAY_CONTROLLER_STARTED_AT: controllerStartedAt
     }
   });
-  const launcherRecord = { role: "launcher", pid: runtime.pid, startedAt: launcherStartedAt, executableName: "powershell.exe", commandIncludes: [launcherPath, "-Port", String(settings.port)] };
+  const launcherRecord = {
+    role: "launcher", pid: runtime.pid, startedAt: launcherStartedAt,
+    executableName: path.basename(launcherExe), executablePath: launcherExe,
+    commandIncludes: process.platform === "win32" ? [launcherPath, "-Port", String(settings.port)] : [linuxLauncherPath, String(settings.port)]
+  };
   await persistSessionMeta({ launcher: launcherRecord, runtimeState: "starting" });
   recordLifecycle("launcher.start", { pid: runtime.pid, startedAt: launcherStartedAt, port: settings.port });
 
@@ -451,7 +459,30 @@ function handlePluginChunk(chunk, level) {
   const match = text.match(/Public MCP:\s*(https:\/\/\S+)/);
   if (match) publicUrl = match[1];
 }
-function taskkill(pid) {
+function taskkill(pid, { graceful = false } = {}) {
+  if (process.platform !== "win32") {
+    try { process.kill(graceful ? pid : -pid, "SIGTERM"); } catch (error) {
+      try { process.kill(pid, "SIGTERM"); } catch (inner) {
+        return Promise.resolve({ ok: inner.code === "ESRCH", error: inner.code === "ESRCH" ? null : inner.message });
+      }
+    }
+    return (async () => {
+      const deadline = Date.now() + (graceful ? 3500 : 500);
+      while (Date.now() < deadline) {
+        try { process.kill(pid, 0); } catch (error) {
+          if (error.code === "ESRCH") return { ok: true, error: null };
+          if (error.code !== "EPERM") return { ok: false, error: error.message };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      try { process.kill(-pid, "SIGKILL"); } catch (error) {
+        try { process.kill(pid, "SIGKILL"); } catch (inner) {
+          return { ok: inner.code === "ESRCH", error: inner.code === "ESRCH" ? null : inner.message };
+        }
+      }
+      return { ok: true, error: null };
+    })();
+  }
   return new Promise((resolve) => {
     execFile("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (error) => resolve({ ok: !error, error: error?.message ?? null }));
   });
@@ -468,7 +499,7 @@ async function stopRuntime(reason = "user") {
   state.stopping = true;
   pushLog(pluginLogs, `[GUI] Stopping runtime (${reason})...`);
   recordLifecycle("runtime.stop-request", { reason, launcherPid: child.pid });
-  const stopResult = await taskkill(child.pid);
+  const stopResult = await taskkill(child.pid, { graceful: process.platform === "linux" });
   recordLifecycle("runtime.stop-result", { reason, launcherPid: child.pid, ...stopResult });
   await new Promise((resolve) => setTimeout(resolve, 250));
   if (runtime === child) runtime = null;
@@ -512,7 +543,13 @@ async function readJson(req) {
 async function serveStatic(res, fileName, contentType) {
   try {
     const body = await readFile(path.join(publicDir, fileName));
-    res.writeHead(200, { "content-type": contentType, "cache-control": "no-store" });
+    res.writeHead(200, {
+      "content-type": contentType,
+      "cache-control": "no-store",
+      "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "no-referrer"
+    });
     res.end(body);
   } catch {
     res.writeHead(404).end();
@@ -530,7 +567,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/app.js") return void await serveStatic(res, "app.js", "text/javascript; charset=utf-8");
     if (req.method === "GET" && url.pathname === "/styles.css") return void await serveStatic(res, "styles.css", "text/css; charset=utf-8");
     if (req.method === "GET" && url.pathname === "/api/state") {
-      if (req.headers["x-devrelay-gui-host"] === "wpf") handleGuiHostSignal();
+      if (req.headers["x-devrelay-gui-host"]) handleGuiHostSignal();
       await refreshSetupFromDisk();
       return sendJson(res, 200, snapshot());
     }
@@ -599,7 +636,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 409, { error: "Stop DevRelay before changing connection setup." });
       }
       if (!setupProcess) {
-        setupProcess = spawn(process.execPath, [setupWizardPath], { cwd: internalRoot, windowsHide: true, stdio: "ignore", env: { ...process.env, DEVRELAY_CASCADE_WINDOW: "1" } });
+        setupProcess = spawn(process.execPath, [setupWizardPath], { cwd: internalRoot, windowsHide: true, detached: process.platform !== "win32", stdio: "ignore" });
         setupProcess.once("error", (error) => { pushLog(pluginLogs, `[GUI] Setup window failed: ${error.message}`, "error"); setupProcess = null; });
         setupProcess.once("exit", async () => {
           setupProcess = null;
@@ -632,34 +669,27 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
   }
 });
-function runPowerShellFile(filePath, args = []) {
-  return new Promise((resolve, reject) => {
-    const child = spawn("powershell.exe", [
-      "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", filePath, ...args
-    ], { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
-    child.once("error", reject);
-    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`${path.basename(filePath)} exited with code ${code ?? "?"}.`)));
-  });
-}
-
 async function launchWindow() {
-  await runPowerShellFile(hostSetupPath, ["-Root", webView2Root]);
-  await runPowerShellFile(fontSetupPath, ["-Root", fontRoot]);
-  const profile = path.join(stateDir, "webview2-profile");
-  const url = `http://127.0.0.1:${guiPort}/`;
+  const url = `http://127.0.0.1:${guiPort}/?host=electron`;
   windowLaunchedAt = Date.now();
   windowCloseRequestedAt = 0;
   lastHostHeartbeatAt = 0;
   lastHostHeartbeatStatus = "healthy";
   windowReady = false;
-  const hostArgs = [
-    "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta",
-    "-File", hostScriptPath, "-Url", url, "-SdkRoot", webView2Root, "-ProfileDir", profile, "-WindowStatePath", windowStatePath
+  const hostArgs = [electronHostPath,
+    "--devrelay-url", url,
+    "--devrelay-mode", "main",
+    "--devrelay-title", "DevRelay",
+    "--devrelay-window-state", windowStatePath,
+    "--devrelay-user-data", path.join(stateDir, "electron-main-profile"),
+    "--devrelay-width", "900", "--devrelay-height", "700",
+    "--devrelay-min-width", "480", "--devrelay-min-height", "480"
   ];
-  if (process.env.DEVRELAY_CASCADE_WINDOW === "1") hostArgs.push("-CascadeFromStatePath", setupWindowStatePath);
   const hostStartedAt = new Date().toISOString();
-  windowHost = spawn("powershell.exe", hostArgs, { cwd: internalRoot, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-  const hostRecord = { role: "window-host", pid: windowHost.pid, startedAt: hostStartedAt, executableName: "powershell.exe", commandIncludes: [hostScriptPath, url] };
+  windowHost = spawn(electronPath, hostArgs, {
+    cwd: internalRoot, detached: process.platform !== "win32", env: electronSpawnEnvironment(), stdio: ["ignore", "pipe", "pipe"]
+  });
+  const hostRecord = { role: "window-host", pid: windowHost.pid, startedAt: hostStartedAt, executableName: path.basename(electronPath), executablePath: electronPath, commandIncludes: [electronHostPath, url] };
   await persistSessionMeta({ windowHost: hostRecord });
   recordLifecycle("gui-host.start", { pid: windowHost.pid, startedAt: hostStartedAt });
   windowHost.stdout.setEncoding("utf8");
@@ -695,7 +725,7 @@ async function shutdown(reason) {
   const endedAt = new Date().toISOString();
   await persistSessionMeta({ endedAt, status: "closed", exitReason: reason, launcher: null });
   recordLifecycle("controller.shutdown-complete", { reason, endedAt });
-  if (setupProcess?.pid) await taskkill(setupProcess.pid);
+  if (setupProcess?.pid) await taskkill(setupProcess.pid, { graceful: process.platform === "linux" });
   await new Promise((resolve) => server.close(resolve));
   if (windowHost?.pid) await taskkill(windowHost.pid);
   process.exit(0);

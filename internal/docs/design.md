@@ -32,7 +32,7 @@ This does not mean DevRelay is stateless. Machine-local settings, setup state, c
 
 ## GUI is the human control and observation surface
 
-The Windows launcher GUI exists for the human operator. It makes remote command access visible and provides explicit controls for setup, authorization, lifecycle, settings, and diagnostics.
+The desktop GUI exists for the human operator. It makes remote command access visible and provides explicit controls for setup, authorization, lifecycle, settings, and diagnostics.
 
 The MCP/process interface is the machine-facing execution path; the GUI is the human-facing control and observation surface. DevRelay keeps those responsibilities separate. The GUI is not the execution API and is not a remote-desktop interface.
 

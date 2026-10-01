@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { appendFile, readFile, readdir, writeFile } from "node:fs/promises";
+import { appendFile, readFile, readdir, readlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const SESSION_PATTERN = /^\d{8}-\d{6}-[0-9a-f]{8}$/i;
@@ -27,11 +27,11 @@ export function trackedProcessMatches(record, actual, { internalRoot }) {
 
   const expectedName = String(record.executableName ?? "").toLowerCase();
   const actualName = String(actual.name ?? "").toLowerCase();
-  if (expectedName && expectedName !== actualName) return false;
-  if (Number(record.parentPid) > 0 && Number(actual.parentProcessId) > 0 && Number(record.parentPid) !== Number(actual.parentProcessId)) return false;
-
   const expectedPath = normalize(record.executablePath);
   const actualPath = normalize(actual.executablePath);
+  if (expectedName && expectedName !== actualName && !(expectedPath && expectedPath === actualPath)) return false;
+  if (Number(record.parentPid) > 0 && Number(actual.parentProcessId) > 0 && Number(record.parentPid) !== Number(actual.parentProcessId)) return false;
+
   if (expectedPath && (!actualPath || expectedPath !== actualPath)) return false;
 
   const expectedStart = Date.parse(record.startedAt ?? "");
@@ -46,14 +46,18 @@ export function trackedProcessMatches(record, actual, { internalRoot }) {
   }
 
   if (record.role === "launcher") {
-    const launcherPath = normalize(path.join(internalRoot, "scripts", "DevRelay-Launcher.ps1"));
-    if (!commandLine.includes(launcherPath)) return false;
+    const launcherIncludes = Array.isArray(record.commandIncludes) && record.commandIncludes.length
+      ? record.commandIncludes
+      : [path.join(internalRoot, "scripts", "DevRelay-Launcher.ps1")];
+    if (!launcherIncludes.every((fragment) => commandLine.includes(normalize(fragment)))) return false;
   } else if (record.role === "runtime") {
     const runtimePath = normalize(path.join(internalRoot, "dist", "src", "main.js"));
     if (!commandLine.includes(runtimePath)) return false;
   } else if (record.role === "window-host") {
-    const hostPath = normalize(path.join(internalRoot, "gui", "host", "DevRelay-GuiHost.ps1"));
-    if (!commandLine.includes(hostPath)) return false;
+    const expectedCommands = Array.isArray(record.commandIncludes) && record.commandIncludes.length
+      ? record.commandIncludes
+      : [path.join(internalRoot, "gui", "host", "DevRelay-GuiHost.ps1")];
+    if (!expectedCommands.every((fragment) => commandLine.includes(normalize(fragment)))) return false;
   } else if (record.role === "controller") {
     const controllerPath = normalize(path.join(internalRoot, "gui", "devrelay-gui.mjs"));
     if (!commandLine.includes(controllerPath)) return false;
@@ -84,7 +88,7 @@ export function selectSessionOwnedProcesses({ sessionDir, internalRoot, sessionM
   // session directory as the --logfile location.
   const sessionNeedle = normalize(sessionDir);
   for (const actual of processes) {
-    if (String(actual.name ?? "").toLowerCase() !== "cloudflared.exe") continue;
+    if (String(actual.name ?? "").toLowerCase().replace(/\.exe$/, "") !== "cloudflared") continue;
     if (!normalize(actual.commandLine).includes(sessionNeedle)) continue;
     selected.set(Number(actual.processId), { role: "legacy-tunnel", process: actual });
   }
@@ -94,6 +98,7 @@ export function selectSessionOwnedProcesses({ sessionDir, internalRoot, sessionM
 }
 
 export async function queryWindowsProcesses() {
+  if (process.platform === "linux") return await queryLinuxProcesses();
   if (process.platform !== "win32") return [];
   const script = [
     "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)",
@@ -116,6 +121,46 @@ export async function queryWindowsProcesses() {
         }
       });
   });
+}
+
+export async function queryLinuxProcesses({ procRoot = "/proc" } = {}) {
+  let processDirs = [];
+  try { processDirs = await readdir(procRoot, { withFileTypes: true }); }
+  catch { return []; }
+  const uptime = Number((await readFile(path.join(procRoot, "uptime"), "utf8").catch(() => "0")).split(/\s+/)[0]);
+  const bootTimeMs = Date.now() - (Number.isFinite(uptime) ? uptime : 0) * 1000;
+  const processes = await Promise.all(processDirs
+    .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+    .map(async (entry) => {
+      const pid = Number(entry.name);
+      const base = path.join(procRoot, entry.name);
+      try {
+        const [statText, rawCommand, exePath] = await Promise.all([
+          readFile(path.join(base, "stat"), "utf8"),
+          readFile(path.join(base, "cmdline")),
+          readlink(path.join(base, "exe")).catch(() => "")
+        ]);
+        const closeParen = statText.lastIndexOf(")");
+        if (closeParen < 0) return null;
+        const fields = statText.slice(closeParen + 1).trim().split(/\s+/);
+        const name = statText.slice(statText.indexOf("(") + 1, closeParen);
+        const parentProcessId = Number(fields[1]);
+        const startTicks = Number(fields[19]);
+        const commandLine = rawCommand.toString("utf8").replaceAll("\0", " ").trim() || name;
+        const creationDate = Number.isFinite(startTicks)
+          ? new Date(bootTimeMs + startTicks * 10).toISOString()
+          : null;
+        return {
+          processId: pid,
+          parentProcessId: Number.isInteger(parentProcessId) ? parentProcessId : 0,
+          name,
+          executablePath: exePath.replace(/ \(deleted\)$/, ""),
+          commandLine,
+          creationDate
+        };
+      } catch { return null; }
+    }));
+  return processes.filter(Boolean);
 }
 
 export async function queryRecentWindowsEvents(minutes = 15, limit = 120) {
@@ -148,7 +193,35 @@ export async function queryRecentWindowsEvents(minutes = 15, limit = 120) {
   });
 }
 
-async function killProcessTree(pid) {
+export async function killProcessTree(pid) {
+  if (process.platform !== "win32") {
+    const processes = process.platform === "linux" ? await queryLinuxProcesses() : [];
+    const children = new Map();
+    for (const item of processes) {
+      const parentPid = Number(item.parentProcessId);
+      const list = children.get(parentPid) ?? [];
+      list.push(Number(item.processId));
+      children.set(parentPid, list);
+    }
+    const ordered = [];
+    const visit = (current, seen = new Set()) => {
+      if (seen.has(current)) return;
+      seen.add(current);
+      for (const child of children.get(current) ?? []) visit(child, seen);
+      ordered.push(current);
+    };
+    visit(Number(pid));
+    for (const current of ordered) {
+      try { process.kill(current, "SIGTERM"); }
+      catch (error) { if (error.code !== "ESRCH") return { ok: false, error: error.message }; }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    for (const current of ordered) {
+      try { process.kill(current, "SIGKILL"); }
+      catch (error) { if (error.code !== "ESRCH") return { ok: false, error: error.message }; }
+    }
+    return { ok: true, error: null };
+  }
   return await new Promise((resolve) => {
     execFile("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (error) => {
       resolve({ ok: !error, error: error?.message ?? null });

@@ -22,9 +22,11 @@ Tailscale Funnel and both Cloudflare HTTPS variants use DevRelay OAuth 2.1 Autho
 
 OAuth consent is deliberately local. A public authorization request remains pending until the visible normal DevRelay GUI approves it using a per-runtime control secret that is never exposed through the public endpoint.
 
+If a machine migration loses only the DCR client file, an authorization request can reconstruct a DevRelay-issued client ID only when the ID has DevRelay's generated format, its redirect is an allowed HTTPS ChatGPT/OpenAI URI, and the request passes resource and PKCE validation. The normal local consent step still applies. This does not restore missing refresh-token records; the client must complete authorization again to receive new tokens.
+
 ## OpenAI Secure Tunnel credentials
 
-The OpenAI runtime API key is accepted by the Setup wizard over its loopback-only local API and is forwarded to the setup PowerShell action through stdin, not a command-line argument. DevRelay stores the key under `.devrelay/` using Windows DPAPI for the current Windows user.
+The OpenAI runtime API key is accepted by the Setup wizard over its loopback-only local API and is forwarded to the setup action through a temporary mode-0600 file, not a command-line argument. Windows stores the key using DPAPI for the current Windows user. Linux stores it in a mode-0600 file under `.devrelay/`, whose directory is restricted to the current user.
 
 The Tunnel ID is not treated as a secret. The runtime launcher is non-interactive; missing or invalid credentials direct the user back to Connection Setup instead of opening hidden console prompts.
 
@@ -32,7 +34,7 @@ The Tunnel ID is not treated as a secret. The runtime launcher is non-interactiv
 
 OpenAI `tunnel-client` and Cloudflare `cloudflared` are downloaded from their official release sources when missing. Where the release source supplies a SHA-256 digest, DevRelay verifies it before use.
 
-Tailscale is not embedded into the repository. Setup downloads the official Windows installer on request, verifies the published SHA-256 when available, and starts that installer with Windows elevation/UAC. DevRelay itself should continue to run as the normal user.
+Tailscale is not embedded into the repository. Windows setup can download the official installer, verify the published SHA-256 when available, and start it with Windows elevation/UAC. Linux users install the official package for their distribution before setup. DevRelay itself should continue to run as the normal user.
 
 ## Operating-system permissions
 
@@ -52,9 +54,9 @@ Managed process metadata and buffered output live only in memory. Each visible n
 
 ## Visible control GUI
 
-The Windows GUI is DevRelay's human-facing control and observation surface. It makes remote access visible and owns local setup, authorization, lifecycle, settings, and diagnostics; machine-facing execution remains on the MCP/process interface.
+The Electron GUI is DevRelay's human-facing control and observation surface. It makes remote access visible and owns local setup, authorization, lifecycle, settings, and diagnostics; machine-facing execution remains on the MCP/process interface.
 
-The normal Windows GUI controller binds only to `127.0.0.1:7318` and rejects state-changing requests from other browser origins. Auto-start is gated on a native WPF `window-ready` signal. The WPF state view may refresh frequently, but the supplemental native-host heartbeat is emitted only once every two minutes and is diagnostic only: 2.5 minutes without a signal is logged as stale and five minutes as lost, but neither condition stops the runtime because Windows sleep can suspend both timers while preserving the GUI process. The actual WPF host process/window lifecycle remains authoritative and closes the controller immediately when the GUI truly exits. The controller separately remembers whether the user wants the runtime running; if a long heartbeat gap later proves to be a GUI recovery and the runtime is stopped, it is restarted only when that desired state is still Start. An explicit Stop clears the desired state and is never overridden by heartbeat recovery. WebView2 renderer failures are recovered independently without stopping the runtime. Closing the GUI host invokes the stop path and then closes the controller. There is no tray/background-only mode in the normal launcher.
+The GUI controller binds only to `127.0.0.1:7318` and rejects state-changing requests from other browser origins. Auto-start is gated on an Electron `window-ready` signal. Its host heartbeat is written at most once every two minutes and is diagnostic only: long gaps are logged but do not stop the runtime because the desktop may suspend the process. The Electron host process/window lifecycle remains authoritative and closes the controller when the GUI exits. The controller separately remembers whether the user wants the runtime running; after a host recovery it restarts only when that desired state is still Start. An explicit Stop clears the desired state and is never overridden by heartbeat recovery. Renderer failures do not stop the runtime. On Wayland, the desktop may block programmatic focus changes, so OAuth approval also triggers a desktop notification. Closing the GUI host invokes the stop path and then closes the controller. There is no tray/background-only mode in the normal launcher.
 
 ## Multiple-device isolation
 

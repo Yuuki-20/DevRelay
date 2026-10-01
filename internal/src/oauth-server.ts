@@ -153,6 +153,12 @@ function redirectUriAllowed(value: string): boolean {
   }
 }
 
+function isRecoverableClientId(value: string | null): value is string {
+  // Dynamic client IDs issued by DevRelay use randomBytes(24), which encodes
+  // to exactly 32 base64url characters after this prefix.
+  return value !== null && /^drc_[A-Za-z0-9_-]{32}$/.test(value);
+}
+
 function parseScope(value: string | null | undefined): string {
   const requested = (value?.trim() || `${REQUIRED_SCOPE} ${OFFLINE_SCOPE}`).split(/\s+/).filter(Boolean);
   if (!requested.includes(REQUIRED_SCOPE)) requested.unshift(REQUIRED_SCOPE);
@@ -384,7 +390,7 @@ export class DevRelayOAuthServer {
       return true;
     }
     if (request.method === "GET" && url.pathname === "/oauth/authorize") {
-      this.handleAuthorize(response, url);
+      await this.handleAuthorize(response, url);
       return true;
     }
     if (request.method === "GET" && url.pathname === "/oauth/authorize/status") {
@@ -457,14 +463,19 @@ export class DevRelayOAuthServer {
     }
     oauthError(response, 400, error, description);
   }
-  private handleAuthorize(response: ServerResponse, url: URL): void {
+  private async handleAuthorize(response: ServerResponse, url: URL): Promise<void> {
     this.cleanupEphemeral();
     const clientId = url.searchParams.get("client_id");
-    const client = this.clientFromRequest(clientId);
+    let client = this.clientFromRequest(clientId);
     const redirectUri = url.searchParams.get("redirect_uri");
     const state = url.searchParams.get("state");
-    if (!client) return this.authorizationError(response, null, null, state, "unauthorized_client", "Unknown OAuth client.");
-    if (!redirectUri || !client.redirectUris.includes(redirectUri)) {
+    const canRecoverClient = !client && isRecoverableClientId(clientId) &&
+      redirectUri !== null && redirectUriAllowed(redirectUri);
+    if (!client && !canRecoverClient) return this.authorizationError(
+      response, null, null, state, "unauthorized_client",
+      "This DevRelay instance cannot recover this OAuth client registration. Remove and add the MCP connection again to register a new client, or restore the previous host's .devrelay/oauth state."
+    );
+    if (!redirectUri || (client && !client.redirectUris.includes(redirectUri))) {
       return this.authorizationError(response, client, null, state, "invalid_request", "redirect_uri is not registered.");
     }
     if (url.searchParams.get("response_type") !== "code") {
@@ -482,6 +493,30 @@ export class DevRelayOAuthServer {
     try { scope = parseScope(url.searchParams.get("scope")); }
     catch (error) {
       return this.authorizationError(response, client, redirectUri, state, "invalid_scope", error instanceof Error ? error.message : "Invalid scope.");
+    }
+    if (!client && clientId && redirectUri) {
+      // DCR registration is stored locally. When a machine migration lost that
+      // file, reconstruct only DevRelay-shaped IDs after validating the full
+      // authorization request; the owner's existing local consent UI remains
+      // mandatory before any tokens are issued.
+      client = {
+        clientId,
+        redirectUris: [redirectUri],
+        clientName: "ChatGPT (recovered)",
+        createdAt: nowSeconds()
+      };
+      this.clients.set(clientId, client);
+      try {
+        await this.saveClients();
+      } catch (error) {
+        this.clients.delete(clientId);
+        oauthError(response, 500, "server_error", "The recovered OAuth client could not be saved.");
+        return;
+      }
+    }
+    if (!client) {
+      oauthError(response, 500, "server_error", "The OAuth client could not be recovered.");
+      return;
     }
     for (const existing of this.pending.values()) {
       if (existing.expiresAt > Date.now() && existing.clientId === client.clientId &&

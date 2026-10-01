@@ -41,11 +41,11 @@ param(
 $ErrorActionPreference = "SilentlyContinue"
 Start-Sleep -Milliseconds $DelayMs
 $internal = Join-Path $ProjectRoot "internal"
-$hostScript = Join-Path $internal "gui\host\DevRelay-GuiHost.ps1"
+$hostScript = Join-Path $internal "gui\electron-host.cjs"
 $launchVbs = Join-Path $internal "gui\launch.vbs"
 
 $hosts = @(Get-CimInstance Win32_Process | Where-Object {
-  $_.Name -ieq "powershell.exe" -and $_.CommandLine -and
+  $_.Name -ieq "electron.exe" -and $_.CommandLine -and
   $_.CommandLine.IndexOf($hostScript, [StringComparison]::OrdinalIgnoreCase) -ge 0
 })
 foreach ($hostInfo in $hosts) {
@@ -69,7 +69,7 @@ foreach ($hostInfo in $hosts) {
         -Headers @{ Origin = "http://127.0.0.1:7318" } -ContentType "application/json" `
         -Body '{"reason":"window closed"}' -TimeoutSec 4 | Out-Null
     } catch {}
-    Stop-Process -Id $hostPid -Force -ErrorAction SilentlyContinue
+    & taskkill.exe /PID $hostPid /T /F | Out-Null
   }
 }
 

@@ -1,15 +1,17 @@
-# Windows launcher
+# Desktop launcher and GUI
 
 DevRelay has a normal Windows launcher in the project root:
 
 - `DevRelay.exe`: primary taskbar-friendly launcher.
 - `DevRelay.cmd`: compatibility fallback for the same hidden startup bootstrap.
 
-The normal window is a custom-framed WPF/WebView2 host. The setup wizard is a separate WPF/WebView2 window using the same light visual language; it is not an overlay inside the main GUI.
+The main window and separate setup wizard use the same HTML/CSS/JavaScript interfaces inside Electron native windows. The controllers and provider flows are Node.js. Windows-specific integrations still use PowerShell where they depend on Windows APIs.
+
+Windows is the supported release target. Linux GUI/runtime support is being implemented and is not yet a supported release target. For local Linux development, install the core npm dependencies, build, and run `npm run gui` from `internal/`.
 
 ## Startup sequence
 
-`DevRelay.exe` starts `gui/Bootstrap-DevRelayGui.ps1` directly without a console window. The compatibility `DevRelay.cmd` path still hands off through `gui/launch.vbs`. The EXE also creates or refreshes the current user's Start Menu `DevRelay.lnk` with `DevRelay.Desktop`, matching the AppUserModelID set by the WPF host for correct taskbar grouping and pinning.
+`DevRelay.exe` starts `gui/Bootstrap-DevRelayGui.ps1` directly without a console window. The compatibility `DevRelay.cmd` path still hands off through `gui/launch.vbs`. The Electron window uses the `DevRelay.Desktop` AppUserModelID for taskbar grouping and pinning.
 
 The bootstrap performs these steps in order:
 
@@ -23,7 +25,7 @@ A cancelled first-run wizard leaves setup incomplete and the normal GUI does not
 
 ## Release updates
 
-The release updater checks only GitHub's latest published full Release. Ordinary branch pushes, standalone tags, drafts, and prereleases are not followed.
+On Windows, the release updater checks only GitHub's latest published full Release. Ordinary branch pushes, standalone tags, drafts, and prereleases are not followed. Linux development checkouts currently use the source tree and do not have an automatic update path.
 
 The checkout is modified only when `origin` is the official DevRelay repository, the worktree is clean, and the current commit can fast-forward to the release commit. Forks, dirty worktrees, source archives without `.git`, offline machines, and development checkouts ahead of a release are left untouched. `.devrelay` is outside Git and survives updates.
 
@@ -38,7 +40,7 @@ The top-level choices are:
 
 HTTPS offers:
 
-- **Tailscale Funnel** - recommended HTTPS provider. No custom domain is required. If Tailscale is missing, the wizard can download the current official Windows installer and run it with UAC; sign-in remains the normal Tailscale browser flow.
+- **Tailscale Funnel** - recommended HTTPS provider. No custom domain is required. Windows can launch the official installer with UAC. Linux users install the official package for their distribution first; sign-in remains the normal Tailscale browser flow on both platforms.
 - **Cloudflare Named Tunnel** - stable public hostname. Requires a Cloudflare account and a domain already managed by Cloudflare. The wizard uses `cloudflared tunnel login`, tunnel creation, and DNS routing rather than automating the Cloudflare Dashboard.
 - **Cloudflare Quick Tunnel** - no account/domain required. It is temporary: a new `trycloudflare.com` URL can be assigned after restart.
 
@@ -70,7 +72,7 @@ For HTTPS providers:
 2. Open Apps / Plugins and Create (+).
 3. Enter the public DevRelay `/mcp` URL.
 4. Choose **OAuth** authentication.
-5. Create / Scan Tools, then approve the OAuth request in the blocking DevRelay approval dialog. The main window is brought forward when a new request arrives.
+5. Create / Scan Tools, then approve the OAuth request in the blocking DevRelay approval dialog. The host attempts to show the main window and sends a desktop notification when a request arrives. Wayland may prevent programmatic focus changes.
 
 ## Main control GUI
 
@@ -84,7 +86,7 @@ The main controller listens only on `127.0.0.1:7318` and rejects state-changing 
 
 ## Runtime ownership
 
-`scripts/DevRelay-Launcher.ps1` no longer accepts a connection `-Mode`. It reads `.devrelay/setup.json` and runs the selected connection:
+The Windows runtime worker is `scripts/DevRelay-Launcher.ps1`; Linux uses `gui/linux-runtime.mjs`. Both read `.devrelay/setup.json` and supervise the selected connection:
 
 - OpenAI Secure Tunnel: prepare/validate the saved tunnel-client profile and run it beside local DevRelay.
 - Tailscale Funnel: start local DevRelay with HTTPS OAuth metadata and supervise a Funnel process.
@@ -105,10 +107,13 @@ The launcher is non-interactive. Missing connection credentials produce an error
 - `gui/setup/public/`: setup wizard web UI.
 - `gui/devrelay-gui.mjs`: normal GUI controller and runtime owner.
 - `gui/public/`: main log/settings UI.
-- `gui/host/DevRelay-GuiHost.ps1`: shared custom WPF/WebView2 host; SetupMode hides main-window Start/Settings controls.
-- `scripts/DevRelay-SetupActions.ps1`: explicit setup actions invoked by the wizard.
+- `gui/electron-host.cjs`: shared hardened Electron native window host for the main GUI and setup wizard.
+- `gui/open-external.mjs`: opens validated web links through the platform's default browser.
+- `gui/setup/provider-actions.mjs`: Node provider setup and CLI orchestration for Linux.
+- `scripts/DevRelay-SetupActions.ps1`: Windows setup actions, including Windows-only installation and DPAPI operations.
 - `scripts/DevRelay-ProviderTools.ps1`: provider executable download/discovery and DPAPI helpers.
-- `scripts/DevRelay-Launcher.ps1`: non-interactive runtime supervisor.
+- `gui/linux-runtime.mjs`: Node runtime supervisor for Linux.
+- `scripts/DevRelay-Launcher.ps1`: Windows non-interactive runtime supervisor.
 - `scripts/Update-DevRelayFromRelease.ps1`: safe release-only updater.
 
 Mutable state remains under `internal/.devrelay/` and is excluded from Git.

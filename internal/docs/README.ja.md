@@ -10,12 +10,14 @@ DevRelayはリモートIDEでも自律エージェントでもなく、開発環
 
 **MCP surfaceは実用上できるだけ小さく保ちます。** ツール数を減らすこと自体が目的ではなく、必要なworkflowを構成できる最小限の汎用primitiveだけを公開することが目的です。既存のprocess interfaceで自然に表現できない新しいprimitiveが必要な場合にだけ、新しいfirst-class toolを検討します。
 
-MCP/process interfaceは機械向けの実行経路です。Windows GUIは人間向けのcontrol/observation surfaceであり、setup、authorization、lifecycle、settings、diagnosticsを見える形で管理します。GUIを実行APIにはせず、両者の役割を分離します。
+MCP/process interfaceは機械向けの実行経路です。Node/Electron GUIは人間向けのcontrol/observation surfaceであり、setup、authorization、lifecycle、settings、diagnosticsを見える形で管理します。GUIを実行APIにはせず、両者の役割を分離します。Windows固有のDPAPI、インストーラー、release bootstrapにはPowerShellを残します。
+
+Windowsが現在の公開サポート対象です。Linux用のGUI、setup、runtime経路を実装中ですが、まだ安定版のサポート対象ではありません。
 
 ## ビルドとテスト
 
-```powershell
-cd .\internal
+```sh
+cd internal
 npm install
 npm run build
 npm test
@@ -51,22 +53,24 @@ MCPコアにはDB、Git専用API、ファイル専用API、Docker専用API、一
 
 ## WindowsではDevRelay.exeを使う
 
-通常はプロジェクト直下の `DevRelay.exe` をダブルクリックします。`DevRelay.cmd` は互換用fallbackとして残しています。EXEはコンソールを出さずに既存bootstrapを起動し、Start Menuの `DevRelay.lnk` も `DevRelay.Desktop` AppUserModelID付きで作成/更新するため、タスクバーではPowerShellではなくDevRelayとしてピン留めできます。起動前に最新のpublished GitHub Releaseを確認し、その後にローカルの接続セットアップ状態を確認します。
+通常はプロジェクト直下の `DevRelay.exe` をダブルクリックします。`DevRelay.cmd` は互換用fallbackとして残しています。EXEはコンソールを出さずに既存bootstrapを起動し、Electronのウィンドウは `DevRelay.Desktop` AppUserModelIDを使います。起動前に最新のpublished GitHub Releaseを確認し、その後にローカルの接続セットアップ状態を確認します。
 
 新規インストールでは通常GUIより先に、ライトテーマの別ウィンドウ **DevRelay Setup** が開きます。接続方式はこのWizardが管理し、メインGUIのSettingsには従来の `Mode` 選択はありません。
 
 接続方式は次の構成です。
 
 - **OpenAI Secure Tunnel**: 構成としては推奨ですが、ChatGPT/tunnel-client側の既知問題があるため現在はExperimental表示です。Wizardはopenai/tunnel-clientの #71、#57、#41 を正式なissue名と番号で表示し、GitHubへ接続できる場合はOPEN/CLOSED状態も非同期で確認します。
-- **HTTPS / Tailscale Funnel**: HTTPSでは推奨です。独自ドメインは不要で、必要ならWizardから公式Windows版Tailscaleのインストール、通常のブラウザログイン、Funnel準備へ進めます。
+- **HTTPS / Tailscale Funnel**: HTTPSでは推奨です。独自ドメインは不要です。WindowsではWizardから公式Tailscaleインストーラーを起動できます。Linuxではディストリビューション向けの公式パッケージを先に入れ、その後に通常のブラウザログインとFunnel準備を行います。
 - **HTTPS / Cloudflare Named Tunnel**: 固定hostnameを使えますが、CloudflareアカウントとCloudflare管理下のドメインが必要です。Dashboardのブラウザ自動操作はせず、公式 `cloudflared` CLIのログイン・Tunnel作成・DNS routeを使います。
 - **HTTPS / Cloudflare Quick Tunnel**: アカウントもドメインも不要ですが、`trycloudflare.com` のURLは一時的で、Tunnel再作成後に変わることがあります。
 
 Wizardの最後にはChatGPTへの登録手順も表示します。OpenAI Secure TunnelではTunnel接続 + MCP側 `No authentication`、HTTPSでは公開 `/mcp` URL + `OAuth` を案内します。HTTPSのOAuth要求が来るとDevRelayメインウィンドウが前面に出て、画面全体を覆うblocking modalでApprove/Rejectします。
 
+別PCへ移行してDCRクライアント登録だけが失われた場合、DevRelay発行形式のclient ID、許可済みChatGPT/OpenAI HTTPSリダイレクトURI、resourceとPKCEを検証した認可要求から登録を復元します。ローカルGUIでの承認は引き続き必要です。refresh tokenの記録は復元されないため、認可を完了して新しいtokenを発行します。
+
 一度セットアップした後は、メインSettingsの `Connection Setup...` から同じ別ウィンドウを再度開けます。新しい接続は準備に成功した時点でChatGPT登録ガイドの表示前に確定します。最後のガイドは **Close** だけで閉じます。確定前にCancel/ウィンドウを閉じた場合はWizard中に変更したローカル接続ファイルを復元します。Advanced ResetはDevRelay側の接続設定だけを消し、Tailscaleのアンインストールやprovider側のremote resource削除は自動では行いません。
 
-GUIはOS標準フレームを使わないWPF/WebView2ウィンドウです。本文は `Command log` と `Server log`、中央の区切りはドラッグで比率変更でき、その比率をローカル保存します。赤いStart/Stopと歯車は自前タイトルバーに置きます。ウィンドウは最後の通常サイズを記憶し、最小サイズは480×480です。フォントはNoto Sans Mono、テーマは `#FFFFFF Soft` が既定で、設定から `#000000 Soft` に切り替えられます。GUIを閉じるとDevRelayと現在の接続processも停止します。詳細は [launcher.md](launcher.md) を参照してください。
+GUIはElectronのネイティブウィンドウで、同じHTML/CSS/JavaScript画面を使います。本文は `Command log` と `Server log`、中央の区切りはドラッグで比率変更でき、その比率をローカル保存します。Start/StopとSettingsはOS標準タイトルバーの下に表示します。ウィンドウサイズを保存し、最小サイズは480×480です。フォントはNoto Sans Monoがあれば使い、テーマは `#FFFFFF Soft` が既定で、設定から `#000000 Soft` に切り替えられます。WaylandではOSが前面化を制限するため、OAuth承認待ちはデスクトップ通知でも知らせます。GUIを閉じるとDevRelayと現在の接続processも停止します。詳細は [launcher.md](launcher.md) を参照してください。
 
 ## 複数デバイス
 
