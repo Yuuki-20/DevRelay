@@ -33,8 +33,8 @@ const settingsPath = path.join(stateDir, "gui-settings.json");
 const mainGuiPath = path.join(guiDir, "devrelay-gui.mjs");
 const mainGuiOrigin = "http://127.0.0.1:7318";
 
-if (process.platform !== "win32" && process.platform !== "linux") {
-  throw new Error(`The DevRelay setup GUI currently supports Windows and Linux, not ${process.platform}.`);
+if (!["win32", "linux", "darwin"].includes(process.platform)) {
+  throw new Error(`The DevRelay setup GUI currently supports Windows, Linux, and macOS, not ${process.platform}.`);
 }
 
 let currentSetup = await ensureSetupState(internalRoot);
@@ -176,7 +176,7 @@ async function runSetupAction(action, input = undefined, options = {}) {
   const inputPath = input === undefined ? null : path.join(stateDir, `setup-input-${randomUUID()}.json`);
   if (inputPath) await writeFile(inputPath, JSON.stringify(input), { encoding: "utf8", mode: 0o600 });
   return await new Promise((resolve, reject) => {
-    const useNodeActions = process.platform === "linux";
+    const useNodeActions = process.platform !== "win32";
     const args = useNodeActions
       ? [providerActionsPath, action, String(port), inputPath ?? ""]
       : ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", setupActionsPath, "-Action", action, "-Port", String(port), ...(inputPath ? ["-InputPath", inputPath] : [])];
@@ -235,7 +235,7 @@ const linkTargets = {
   "openai-api-keys": "https://platform.openai.com/settings/organization/api-keys",
   "openai-issue-71": "https://github.com/openai/tunnel-client/issues/71",
   "chatgpt-settings": "https://chatgpt.com/#settings/Connectors",
-  "tailscale-install": "https://tailscale.com/kb/1031/install-linux"
+  "tailscale-install": process.platform === "darwin" ? "https://tailscale.com/download/mac" : "https://tailscale.com/kb/1031/install-linux"
 };
 
 async function openLink(target) {

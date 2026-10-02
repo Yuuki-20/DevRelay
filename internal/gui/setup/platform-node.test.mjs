@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { electronSpawnEnvironment } from "../electron-environment.mjs";
 import { openExternalUrl } from "../open-external.mjs";
-import { killProcessTree, queryLinuxProcesses, trackedProcessMatches } from "../session-recovery.mjs";
+import { killProcessTree, queryLinuxProcesses, queryMacProcesses, trackedProcessMatches } from "../session-recovery.mjs";
 import { runProviderAction } from "./provider-actions.mjs";
 
 test("Electron window launches do not inherit Node-only Electron mode", () => {
@@ -67,7 +67,41 @@ test("Linux process recovery reads process identity from procfs", async () => {
   } finally { await rm(procRoot, { recursive: true, force: true }); }
 });
 
-test("Linux process recovery terminates the verified process tree", { skip: process.platform !== "linux" }, async () => {
+test("macOS process recovery reads process identity from ps", async () => {
+  const ps = async (args) => args.includes("lstart=")
+    ? "   77     1 Thu Oct  1 09:05:00 2026     /usr/sbin/cfprefsd agent\n 4242    41 Fri Oct  2 22:30:08 2026     /opt/homebrew/bin/node /tmp/devrelay/gui/posix-runtime.mjs 7317\n"
+    : "   77 /usr/sbin/cfprefsd\n 4242 /opt/homebrew/Cellar/node/22.0.0/bin/node\n";
+  const actual = (await queryMacProcesses({ ps })).find((item) => item.processId === 4242);
+  assert.equal(actual.parentProcessId, 41);
+  assert.equal(actual.name, "node");
+  assert.equal(actual.executablePath, "/opt/homebrew/Cellar/node/22.0.0/bin/node");
+  assert.equal(actual.commandLine, "/opt/homebrew/bin/node /tmp/devrelay/gui/posix-runtime.mjs 7317");
+  assert.equal(actual.creationDate, new Date(2026, 9, 2, 22, 30, 8).toISOString());
+
+  const record = {
+    role: "launcher", pid: 4242, parentPid: 41,
+    startedAt: actual.creationDate,
+    executableName: "node",
+    executablePath: "/opt/homebrew/Cellar/node/22.0.0/bin/node",
+    commandIncludes: ["/tmp/devrelay/gui/posix-runtime.mjs", "7317"]
+  };
+  assert.equal(trackedProcessMatches(record, actual, { internalRoot: "/tmp/devrelay" }), true);
+  assert.equal(trackedProcessMatches(record, { ...actual, executablePath: "/usr/local/bin/node" }, { internalRoot: "/tmp/devrelay" }), false);
+});
+
+test("macOS ps reports the full executable path and start time of a child", { skip: process.platform !== "darwin" }, async () => {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 10000)", "devrelay-ps-probe"], { stdio: "ignore" });
+  try {
+    await new Promise((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+    const actual = (await queryMacProcesses()).find((item) => item.processId === child.pid);
+    assert.equal(actual.parentProcessId, process.pid);
+    assert.equal(actual.executablePath, process.execPath);
+    assert.match(actual.commandLine, /devrelay-ps-probe$/);
+    assert.ok(Math.abs(Date.parse(actual.creationDate) - Date.now()) < 30_000);
+  } finally { child.kill("SIGKILL"); }
+});
+
+test("Linux and macOS process recovery terminates the verified process tree", { skip: process.platform === "win32" }, async () => {
   const script = `const { spawn } = require("node:child_process"); const child = spawn("sleep", ["60"], { stdio: "ignore" }); process.stdout.write(String(child.pid) + "\\n"); setInterval(() => {}, 10000);`;
   const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "ignore"] });
   let announcedChildPid = "";
@@ -93,7 +127,7 @@ test("Linux process recovery terminates the verified process tree", { skip: proc
   assert.notEqual(announcedChildPid.trim(), "");
 });
 
-test("Linux Cloudflare setup validates the hostname before invoking provider commands", { skip: process.platform !== "linux" }, async () => {
+test("Linux and macOS Cloudflare setup validates the hostname before invoking provider commands", { skip: process.platform === "win32" }, async () => {
   const internalRoot = await mkdtemp(path.join(os.tmpdir(), "devrelay-provider-test-"));
   try {
     await assert.rejects(

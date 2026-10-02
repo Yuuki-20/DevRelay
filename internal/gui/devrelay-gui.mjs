@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { electronSpawnEnvironment } from "./electron-environment.mjs";
 import { connectionLabel, connectionPublicUrl, ensureSetupState } from "./setup/setup-state.mjs";
 import { classifyGuiHostHeartbeat, isGuiHostRecoverySignal, shouldResumeRuntimeAfterGuiRecovery } from "./gui-host-watchdog.mjs";
-import { queryRecentWindowsEvents, queryWindowsProcesses, recoverUncleanSessions } from "./session-recovery.mjs";
+import { queryProcesses, queryRecentWindowsEvents, recoverUncleanSessions } from "./session-recovery.mjs";
 
 const guiDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -22,7 +22,7 @@ const settingsPath = path.join(stateDir, "gui-settings.json");
 const devicePath = path.join(stateDir, "device.json");
 const updateStatePath = path.join(stateDir, "update-state.json");
 const launcherPath = path.join(internalRoot, "scripts", "DevRelay-Launcher.ps1");
-const linuxLauncherPath = path.join(guiDir, "linux-runtime.mjs");
+const posixLauncherPath = path.join(guiDir, "posix-runtime.mjs");
 const setupWizardPath = path.join(guiDir, "setup", "setup-wizard.mjs");
 const guiPort = 7318;
 const electronHostPath = path.join(guiDir, "electron-host.cjs");
@@ -41,8 +41,8 @@ async function existingGuiIsRunning() {
   });
 }
 if (await existingGuiIsRunning()) process.exit(0);
-if (process.platform !== "win32" && process.platform !== "linux") {
-  throw new Error(`The DevRelay desktop GUI currently supports Windows and Linux, not ${process.platform}.`);
+if (!["win32", "linux", "darwin"].includes(process.platform)) {
+  throw new Error(`The DevRelay desktop GUI currently supports Windows, Linux, and macOS, not ${process.platform}.`);
 }
 
 await mkdir(stateDir, { recursive: true });
@@ -231,7 +231,7 @@ function pushLog(target, message, level = "info") {
 async function captureDiagnosticSnapshot(reason, detail = {}) {
   try {
     const [processes, recentWindowsEvents] = await Promise.all([
-      queryWindowsProcesses(),
+      queryProcesses(),
       queryRecentWindowsEvents(15, 120).catch(() => [])
     ]);
     const knownPids = new Set([process.pid, runtime?.pid, windowHost?.pid, sessionMeta.launcher?.pid, sessionMeta.windowHost?.pid].filter(Number.isInteger));
@@ -382,7 +382,7 @@ async function startRuntime(reason = "user") {
   const launcherExe = process.platform === "win32" ? "powershell.exe" : process.execPath;
   const launcherArgs = process.platform === "win32"
     ? ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcherPath, "-Port", String(settings.port)]
-    : [linuxLauncherPath, String(settings.port)];
+    : [posixLauncherPath, String(settings.port)];
 
   const usesOAuth = setup.connection.kind === "https";
   oauthControlSecret = usesOAuth ? `${randomUUID()}${randomUUID()}`.replaceAll("-", "") : null;
@@ -406,7 +406,7 @@ async function startRuntime(reason = "user") {
   const launcherRecord = {
     role: "launcher", pid: runtime.pid, startedAt: launcherStartedAt,
     executableName: path.basename(launcherExe), executablePath: launcherExe,
-    commandIncludes: process.platform === "win32" ? [launcherPath, "-Port", String(settings.port)] : [linuxLauncherPath, String(settings.port)]
+    commandIncludes: process.platform === "win32" ? [launcherPath, "-Port", String(settings.port)] : [posixLauncherPath, String(settings.port)]
   };
   await persistSessionMeta({ launcher: launcherRecord, runtimeState: "starting" });
   recordLifecycle("launcher.start", { pid: runtime.pid, startedAt: launcherStartedAt, port: settings.port });
@@ -499,7 +499,7 @@ async function stopRuntime(reason = "user") {
   state.stopping = true;
   pushLog(pluginLogs, `[GUI] Stopping runtime (${reason})...`);
   recordLifecycle("runtime.stop-request", { reason, launcherPid: child.pid });
-  const stopResult = await taskkill(child.pid, { graceful: process.platform === "linux" });
+  const stopResult = await taskkill(child.pid, { graceful: process.platform !== "win32" });
   recordLifecycle("runtime.stop-result", { reason, launcherPid: child.pid, ...stopResult });
   await new Promise((resolve) => setTimeout(resolve, 250));
   if (runtime === child) runtime = null;
@@ -725,7 +725,7 @@ async function shutdown(reason) {
   const endedAt = new Date().toISOString();
   await persistSessionMeta({ endedAt, status: "closed", exitReason: reason, launcher: null });
   recordLifecycle("controller.shutdown-complete", { reason, endedAt });
-  if (setupProcess?.pid) await taskkill(setupProcess.pid, { graceful: process.platform === "linux" });
+  if (setupProcess?.pid) await taskkill(setupProcess.pid, { graceful: process.platform !== "win32" });
   await new Promise((resolve) => server.close(resolve));
   if (windowHost?.pid) await taskkill(windowHost.pid);
   process.exit(0);

@@ -6,7 +6,7 @@ The design rule is simple: **if a task can already be done by a CLI, DevRelay do
 
 ## Status
 
-DevRelay is under active development. Published GitHub Releases are the supported distribution and automatic-update channel; `main` may contain unreleased changes. Windows remains the supported release target. Linux support is being implemented; it is not yet a supported release target.
+DevRelay is under active development. Published GitHub Releases are the supported distribution and automatic-update channel; `main` may contain unreleased changes. Windows remains the supported release target. Linux and macOS support is being implemented; neither is a supported release target yet. Both run the desktop GUI from source with `npm run gui` in `internal/`.
 
 ## Features
 
@@ -17,7 +17,7 @@ DevRelay is under active development. Published GitHub Releases are the supporte
 - Managed long-running pipe processes plus opt-in PTY/ConPTY terminal sessions.
 - Cursor-based incremental log reads.
 - Rolling in-memory output buffers.
-- Process-tree termination for managed Windows and Linux processes.
+- Process-tree termination for managed Windows, Linux, and macOS processes.
 - Stable per-device identity with an auto-generated hardware-based default name, editable display name, aliases, and local online metadata.
 - The MCP core has no database, agent loop, general-purpose desktop automation, or embedded tunnel. A separate Node/Electron GUI provides the human-facing control and observation surface for setup, authorization, lifecycle, settings, and diagnostics.
 - The MCP core has five direct runtime dependencies: the MCP server SDK, its Node adapter, Zod, `iconv-lite` for explicit legacy-code-page decoding, and `node-pty` for PTY/ConPTY. The desktop GUI also uses Electron for its native window host.

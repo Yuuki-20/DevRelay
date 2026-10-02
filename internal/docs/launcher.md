@@ -7,7 +7,7 @@ DevRelay has a normal Windows launcher in the project root:
 
 The main window and separate setup wizard use the same HTML/CSS/JavaScript interfaces inside Electron native windows. The controllers and provider flows are Node.js. Windows-specific integrations still use PowerShell where they depend on Windows APIs.
 
-Windows is the supported release target. Linux GUI/runtime support is being implemented and is not yet a supported release target. For local Linux development, install the core npm dependencies, build, and run `npm run gui` from `internal/`.
+Windows is the supported release target. Linux and macOS GUI/runtime support is being implemented and is not yet a supported release target. For local Linux or macOS development, install the core npm dependencies, build, and run `npm run gui` from `internal/`.
 
 ## Startup sequence
 
@@ -25,7 +25,7 @@ A cancelled first-run wizard leaves setup incomplete and the normal GUI does not
 
 ## Release updates
 
-On Windows, the release updater checks only GitHub's latest published full Release. Ordinary branch pushes, standalone tags, drafts, and prereleases are not followed. Linux development checkouts currently use the source tree and do not have an automatic update path.
+On Windows, the release updater checks only GitHub's latest published full Release. Ordinary branch pushes, standalone tags, drafts, and prereleases are not followed. Linux and macOS development checkouts currently use the source tree and do not have an automatic update path.
 
 The checkout is modified only when `origin` is the official DevRelay repository, the worktree is clean, and the current commit can fast-forward to the release commit. Forks, dirty worktrees, source archives without `.git`, offline machines, and development checkouts ahead of a release are left untouched. `.devrelay` is outside Git and survives updates.
 
@@ -40,7 +40,7 @@ The top-level choices are:
 
 HTTPS offers:
 
-- **Tailscale Funnel** - recommended HTTPS provider. No custom domain is required. Windows can launch the official installer with UAC. Linux users install the official package for their distribution first; sign-in remains the normal Tailscale browser flow on both platforms.
+- **Tailscale Funnel** - recommended HTTPS provider. No custom domain is required. Windows can launch the official installer with UAC. Linux users install the official package for their distribution first, and macOS users install the Tailscale app; sign-in remains the normal Tailscale browser flow on every platform. On macOS, DevRelay also finds the CLI bundled inside `/Applications/Tailscale.app` when `tailscale` is not on `PATH`.
 - **Cloudflare Named Tunnel** - stable public hostname. Requires a Cloudflare account and a domain already managed by Cloudflare. The wizard uses `cloudflared tunnel login`, tunnel creation, and DNS routing rather than automating the Cloudflare Dashboard.
 - **Cloudflare Quick Tunnel** - no account/domain required. It is temporary: a new `trycloudflare.com` URL can be assigned after restart.
 
@@ -86,7 +86,7 @@ The main controller listens only on `127.0.0.1:7318` and rejects state-changing 
 
 ## Runtime ownership
 
-The Windows runtime worker is `scripts/DevRelay-Launcher.ps1`; Linux uses `gui/linux-runtime.mjs`. Both read `.devrelay/setup.json` and supervise the selected connection:
+The Windows runtime worker is `scripts/DevRelay-Launcher.ps1`; Linux and macOS use `gui/posix-runtime.mjs`. Both read `.devrelay/setup.json` and supervise the selected connection:
 
 - OpenAI Secure Tunnel: prepare/validate the saved tunnel-client profile and run it beside local DevRelay.
 - Tailscale Funnel: start local DevRelay with HTTPS OAuth metadata and supervise a Funnel process.
@@ -109,10 +109,10 @@ The launcher is non-interactive. Missing connection credentials produce an error
 - `gui/public/`: main log/settings UI.
 - `gui/electron-host.cjs`: shared hardened Electron native window host for the main GUI and setup wizard.
 - `gui/open-external.mjs`: opens validated web links through the platform's default browser.
-- `gui/setup/provider-actions.mjs`: Node provider setup and CLI orchestration for Linux.
+- `gui/setup/provider-actions.mjs`: Node provider setup and CLI orchestration for Linux and macOS.
 - `scripts/DevRelay-SetupActions.ps1`: Windows setup actions, including Windows-only installation and DPAPI operations.
 - `scripts/DevRelay-ProviderTools.ps1`: provider executable download/discovery and DPAPI helpers.
-- `gui/linux-runtime.mjs`: Node runtime supervisor for Linux.
+- `gui/posix-runtime.mjs`: Node runtime supervisor for Linux and macOS.
 - `scripts/DevRelay-Launcher.ps1`: Windows non-interactive runtime supervisor.
 - `scripts/Update-DevRelayFromRelease.ps1`: safe release-only updater.
 

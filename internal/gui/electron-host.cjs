@@ -161,7 +161,11 @@ async function createWindow() {
   setInterval(() => { void pollOAuth(); }, 1000).unref();
 }
 
-app.whenReady().then(createWindow).catch((error) => {
+app.whenReady().then(() => {
+  // macOS ignores BrowserWindow icons; the Dock icon is per application.
+  if (process.platform === "darwin") app.dock?.setIcon(iconPath);
+  return createWindow();
+}).catch((error) => {
   console.error(`[DevRelay GUI] ${error.message}`);
   app.quit();
 });

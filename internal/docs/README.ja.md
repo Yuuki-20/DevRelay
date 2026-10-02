@@ -12,7 +12,7 @@ DevRelayはリモートIDEでも自律エージェントでもなく、開発環
 
 MCP/process interfaceは機械向けの実行経路です。Node/Electron GUIは人間向けのcontrol/observation surfaceであり、setup、authorization、lifecycle、settings、diagnosticsを見える形で管理します。GUIを実行APIにはせず、両者の役割を分離します。Windows固有のDPAPI、インストーラー、release bootstrapにはPowerShellを残します。
 
-Windowsが現在の公開サポート対象です。Linux用のGUI、setup、runtime経路を実装中ですが、まだ安定版のサポート対象ではありません。
+Windowsが現在の公開サポート対象です。LinuxとmacOS用のGUI、setup、runtime経路を実装中ですが、まだ安定版のサポート対象ではありません。どちらも `internal/` で `npm run gui` を実行してソースから起動します。
 
 ## ビルドとテスト
 
@@ -60,7 +60,7 @@ MCPコアにはDB、Git専用API、ファイル専用API、Docker専用API、一
 接続方式は次の構成です。
 
 - **OpenAI Secure Tunnel**: 構成としては推奨ですが、ChatGPT/tunnel-client側の既知問題があるため現在はExperimental表示です。Wizardはopenai/tunnel-clientの #71、#57、#41 を正式なissue名と番号で表示し、GitHubへ接続できる場合はOPEN/CLOSED状態も非同期で確認します。
-- **HTTPS / Tailscale Funnel**: HTTPSでは推奨です。独自ドメインは不要です。WindowsではWizardから公式Tailscaleインストーラーを起動できます。Linuxではディストリビューション向けの公式パッケージを先に入れ、その後に通常のブラウザログインとFunnel準備を行います。
+- **HTTPS / Tailscale Funnel**: HTTPSでは推奨です。独自ドメインは不要です。WindowsではWizardから公式Tailscaleインストーラーを起動できます。Linuxではディストリビューション向けの公式パッケージ、macOSではTailscaleアプリを先に入れ、その後に通常のブラウザログインとFunnel準備を行います。
 - **HTTPS / Cloudflare Named Tunnel**: 固定hostnameを使えますが、CloudflareアカウントとCloudflare管理下のドメインが必要です。Dashboardのブラウザ自動操作はせず、公式 `cloudflared` CLIのログイン・Tunnel作成・DNS routeを使います。
 - **HTTPS / Cloudflare Quick Tunnel**: アカウントもドメインも不要ですが、`trycloudflare.com` のURLは一時的で、Tunnel再作成後に変わることがあります。
 

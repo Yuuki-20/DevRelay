@@ -5,6 +5,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { tailscalePath } from "./setup/provider-actions.mjs";
 
 const guiDir = path.dirname(fileURLToPath(import.meta.url));
 const internalRoot = path.resolve(guiDir, "..");
@@ -162,14 +163,14 @@ async function findExecutable(name) {
 async function providerExecutable(name, stateName, archSuffix) {
   const fromPath = await findExecutable(name);
   if (fromPath) return fromPath;
-  const local = path.join(stateDir, "tools", stateName, `${name}-linux-${archSuffix}`);
+  const local = path.join(stateDir, "tools", stateName, `${name}-${process.platform}-${archSuffix}`);
   try { await access(local, 1); return local; } catch {}
   throw new Error(`${name} is not installed. Reopen Connection Setup.`);
 }
 function platformArch() {
   if (process.arch === "x64") return "amd64";
   if (process.arch === "arm64") return "arm64";
-  throw new Error(`Unsupported Linux architecture: ${process.arch}`);
+  throw new Error(`Unsupported ${process.platform} architecture: ${process.arch}`);
 }
 function getDnsName(status) { return String(status?.Self?.DNSName ?? "").replace(/\.+$/, "") || null; }
 
@@ -182,7 +183,9 @@ async function ensureBuild() {
   const state = await readJson(statePath) ?? {};
   let lockHash = "missing";
   try { lockHash = createHash("sha256").update(await readFile(lockPath)).digest("hex"); } catch {}
-  let shouldInstall = !await exists(nodeModules) || state.packageLockHash !== lockHash;
+  // The GUI already runs Electron from node_modules here, and `npm ci` deletes it.
+  // Adopt the user's own install on first start; a later lockfile change still reinstalls.
+  let shouldInstall = !await exists(nodeModules) || (state.packageLockHash ?? lockHash) !== lockHash;
   if (shouldInstall) {
     log("Installing npm dependencies...");
     await runCommand("npm", ["ci"], { env: process.env });
@@ -330,7 +333,7 @@ async function runLauncher() {
     publicUrl = quick.publicUrl;
     tunnel = quick.running;
   } else if (connection.provider === "tailscale") {
-    const tailscale = await findExecutable("tailscale");
+    const tailscale = await tailscalePath();
     if (!tailscale) throw new Error("Tailscale is not installed. Reopen Connection Setup.");
     const statusResult = await spawnCommand(tailscale, ["status", "--json"], { logOutput: false }).completion;
     if (statusResult.code !== 0) throw new Error("Tailscale is not signed in.");
@@ -356,7 +359,7 @@ async function runLauncher() {
   if (!runtime) runtime = await startDevRelay(runtimeEnv);
 
   if (connection.provider === "tailscale") {
-    const tailscale = await findExecutable("tailscale");
+    const tailscale = await tailscalePath();
     tunnel = await startTailscaleTunnel(tailscale);
     await new Promise((resolve) => setTimeout(resolve, 1000));
     if (tunnel.child.exitCode !== null || tunnel.child.signalCode !== null) throw new Error("Tailscale Funnel exited during startup.");
@@ -393,7 +396,7 @@ async function shutdown(signal) {
   appendLifecycle("launcher.signal", { signal });
   await stopChildren();
   if (currentConnection?.provider === "tailscale") {
-    const tailscale = await findExecutable("tailscale");
+    const tailscale = await tailscalePath();
     if (tailscale) await spawnCommand(tailscale, ["funnel", "reset"], { logOutput: false }).completion.catch(() => {});
   }
 }
@@ -414,7 +417,7 @@ try {
   if (tracked.runtime) appendLifecycle("runtime.clear", { pid: tracked.runtime.pid, reason: "launcher-exit" });
   if (tracked.tunnel) appendLifecycle("tunnel.clear", { pid: tracked.tunnel.pid, reason: "launcher-exit" });
   if (currentConnection?.provider === "tailscale") {
-    const tailscale = await findExecutable("tailscale");
+    const tailscale = await tailscalePath();
     if (tailscale) await spawnCommand(tailscale, ["funnel", "reset"], { logOutput: false }).completion.catch(() => {});
   }
   tracked.runtime = null;
