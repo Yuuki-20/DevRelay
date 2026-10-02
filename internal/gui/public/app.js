@@ -102,6 +102,15 @@ logSplitter.addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => applyLogSplit());
 requestAnimationFrame(() => applyLogSplit());
 
+// Rewriting unchanged text replaces its DOM node, which drops the user's selection
+// on every 500 ms state poll.
+function setText(element, value) {
+  if (element.textContent !== value) element.textContent = value;
+}
+function setValue(input, value) {
+  if (input.value !== value) input.value = value;
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -168,23 +177,23 @@ function render(state) {
 
   if (electronToolbar && electronHost) {
     electronToolbar.hidden = false;
-    runtimeStatus.textContent = state.starting ? "Starting" : state.stopping ? "Stopping" : state.running ? "Running" : "Stopped";
-    runtimeToggle.textContent = active ? "Stop" : "Start";
+    setText(runtimeStatus, state.starting ? "Starting" : state.stopping ? "Stopping" : state.running ? "Running" : "Stopped");
+    setText(runtimeToggle, active ? "Stop" : "Start");
     runtimeToggle.disabled = transition || requestBusy || (!active && !state.setupComplete);
     runtimeToggle.setAttribute("aria-label", active ? "Stop DevRelay" : "Start DevRelay");
     toolbarSettings.disabled = Boolean(state.oauthPending?.length) || requestBusy;
   }
 
   document.documentElement.dataset.theme = settingsDirty ? themeSelect.value : (state.theme === "black-soft" ? "black-soft" : "white-soft");
-  publicUrl.textContent = state.publicUrl || "-";
+  setText(publicUrl, state.publicUrl || "-");
   if (!settingsDirty) {
-    deviceNameInput.value = state.device?.name || "";
-    deviceAliasesInput.value = (state.device?.aliases || []).join(", ");
-    deviceDefaultName.textContent = state.device?.defaultName || "Initializing...";
-    deviceStatus.textContent = state.device?.online ? "Online" : "Offline";
-    deviceNodeId.textContent = state.device?.nodeId || "-";
+    setValue(deviceNameInput, state.device?.name || "");
+    setValue(deviceAliasesInput, (state.device?.aliases || []).join(", "));
+    setText(deviceDefaultName, state.device?.defaultName || "Initializing...");
+    setText(deviceStatus, state.device?.online ? "Online" : "Offline");
+    setText(deviceNodeId, state.device?.nodeId || "-");
     themeSelect.value = state.theme === "black-soft" ? "black-soft" : "white-soft";
-    portInput.value = state.port;
+    setValue(portInput, String(state.port));
     autoStartInput.checked = state.autoStart;
   }
 
@@ -200,9 +209,9 @@ function render(state) {
   const pendingOAuth = state.oauthPending?.[0] ?? null;
   oauthApproval.hidden = !pendingOAuth;
   if (pendingOAuth) {
-    oauthClientName.textContent = pendingOAuth.clientName || "OAuth client";
-    oauthRedirectHost.textContent = pendingOAuth.redirectHost || "unknown";
-    oauthScopes.textContent = (pendingOAuth.scopes || []).join(" ") || "-";
+    setText(oauthClientName, pendingOAuth.clientName || "OAuth client");
+    setText(oauthRedirectHost, pendingOAuth.redirectHost || "unknown");
+    setText(oauthScopes, (pendingOAuth.scopes || []).join(" ") || "-");
     approveOAuth.disabled = requestBusy;
     denyOAuth.disabled = requestBusy;
     if (pendingOAuth.id !== lastOAuthPendingId) {
