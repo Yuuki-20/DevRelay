@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { electronSpawnEnvironment } from "./electron-environment.mjs";
+import { ensureNotoSansMono } from "./font-setup.mjs";
 import { connectionLabel, connectionPublicUrl, ensureSetupState } from "./setup/setup-state.mjs";
 import { classifyGuiHostHeartbeat, isGuiHostRecoverySignal, shouldResumeRuntimeAfterGuiRecovery } from "./gui-host-watchdog.mjs";
 import { queryProcesses, queryRecentWindowsEvents, recoverUncleanSessions } from "./session-recovery.mjs";
@@ -18,6 +19,7 @@ const internalRoot = path.resolve(guiDir, "..");
 const publicDir = path.join(guiDir, "public");
 const stateDir = path.join(internalRoot, ".devrelay");
 const windowStatePath = path.join(stateDir, "window-state.json");
+const setupWindowStatePath = path.join(stateDir, "setup-window-state.json");
 const settingsPath = path.join(stateDir, "gui-settings.json");
 const devicePath = path.join(stateDir, "device.json");
 const updateStatePath = path.join(stateDir, "update-state.json");
@@ -636,7 +638,10 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 409, { error: "Stop DevRelay before changing connection setup." });
       }
       if (!setupProcess) {
-        setupProcess = spawn(process.execPath, [setupWizardPath], { cwd: internalRoot, windowsHide: true, detached: process.platform !== "win32", stdio: "ignore" });
+        setupProcess = spawn(process.execPath, [setupWizardPath], {
+          cwd: internalRoot, windowsHide: true, detached: process.platform !== "win32", stdio: "ignore",
+          env: { ...process.env, DEVRELAY_CASCADE_WINDOW: "1" }
+        });
         setupProcess.once("error", (error) => { pushLog(pluginLogs, `[GUI] Setup window failed: ${error.message}`, "error"); setupProcess = null; });
         setupProcess.once("exit", async () => {
           setupProcess = null;
@@ -670,7 +675,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 async function launchWindow() {
-  const url = `http://127.0.0.1:${guiPort}/?host=electron`;
+  await ensureNotoSansMono(stateDir).catch((error) => pushLog(pluginLogs, `[GUI] Noto Sans Mono setup failed: ${error.message}`, "warn"));
+  const url = `http://127.0.0.1:${guiPort}/`;
   windowLaunchedAt = Date.now();
   windowCloseRequestedAt = 0;
   lastHostHeartbeatAt = 0;
@@ -682,9 +688,10 @@ async function launchWindow() {
     "--devrelay-title", "DevRelay",
     "--devrelay-window-state", windowStatePath,
     "--devrelay-user-data", path.join(stateDir, "electron-main-profile"),
-    "--devrelay-width", "900", "--devrelay-height", "700",
+    "--devrelay-width", "780", "--devrelay-height", "560",
     "--devrelay-min-width", "480", "--devrelay-min-height", "480"
   ];
+  if (process.env.DEVRELAY_CASCADE_WINDOW === "1") hostArgs.push("--devrelay-cascade-from", setupWindowStatePath);
   const hostStartedAt = new Date().toISOString();
   windowHost = spawn(electronPath, hostArgs, {
     cwd: internalRoot, detached: process.platform !== "win32", env: electronSpawnEnvironment(), stdio: ["ignore", "pipe", "pipe"]

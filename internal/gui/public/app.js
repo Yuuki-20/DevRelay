@@ -1,12 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
 const logs = $(".logs");
-const electronToolbar = $("#electronToolbar");
-const runtimeToggle = $("#runtimeToggle");
-const runtimeStatus = $("#runtimeStatus");
-const toolbarSettings = $("#toolbarSettings");
-const electronHost = new URLSearchParams(location.search).get("host") === "electron";
-if (electronHost) document.documentElement.classList.add("electron-host");
-if (electronToolbar) electronToolbar.hidden = !electronHost;
 const logSplitter = $("#logSplitter");
 const aiLog = $("#aiLog");
 const pluginLog = $("#pluginLog");
@@ -175,15 +168,6 @@ function render(state) {
   const active = state.running || state.starting;
   const transition = state.starting || state.stopping;
 
-  if (electronToolbar && electronHost) {
-    electronToolbar.hidden = false;
-    setText(runtimeStatus, state.starting ? "Starting" : state.stopping ? "Stopping" : state.running ? "Running" : "Stopped");
-    setText(runtimeToggle, active ? "Stop" : "Start");
-    runtimeToggle.disabled = transition || requestBusy || (!active && !state.setupComplete);
-    runtimeToggle.setAttribute("aria-label", active ? "Stop DevRelay" : "Start DevRelay");
-    toolbarSettings.disabled = Boolean(state.oauthPending?.length) || requestBusy;
-  }
-
   document.documentElement.dataset.theme = settingsDirty ? themeSelect.value : (state.theme === "black-soft" ? "black-soft" : "white-soft");
   setText(publicUrl, state.publicUrl || "-");
   if (!settingsDirty) {
@@ -235,24 +219,6 @@ function render(state) {
     lastPluginRevision = state.pluginLogRevision;
   }
 }
-
-runtimeToggle?.addEventListener("click", async () => {
-  if (requestBusy || !lastState) return;
-  requestBusy = true;
-  runtimeToggle.disabled = true;
-  try {
-    const endpoint = lastState.running || lastState.starting ? "/api/stop" : "/api/start";
-    await api(endpoint, { method: "POST", body: "{}" });
-  } catch (error) {
-    runtimeStatus.textContent = error.message;
-  } finally {
-    requestBusy = false;
-    await refresh();
-  }
-});
-toolbarSettings?.addEventListener("click", () => {
-  if (!toolbarSettings.disabled) window.DevRelayUi.toggleSettings();
-});
 
 async function api(path, options = {}) {
   const response = await fetch(path, {

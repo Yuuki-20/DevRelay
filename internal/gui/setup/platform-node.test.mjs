@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { electronSpawnEnvironment } from "../electron-environment.mjs";
+import { downloadVerifiedFont, isNotoSansMonoFile, userFontDir } from "../font-setup.mjs";
 import { openExternalUrl } from "../open-external.mjs";
+import { shouldInstall } from "../prepare.mjs";
 import { killProcessTree, queryLinuxProcesses, queryMacProcesses, trackedProcessMatches } from "../session-recovery.mjs";
 import { runProviderAction } from "./provider-actions.mjs";
 
@@ -140,4 +143,41 @@ test("Linux and macOS Cloudflare setup validates the hostname before invoking pr
     );
     assert.deepEqual(await readFile(path.join(internalRoot, ".devrelay", "launcher.json")).then(() => "present", () => "missing"), "missing");
   } finally { await rm(internalRoot, { recursive: true, force: true }); }
+});
+
+test("an existing node_modules is adopted until a lockfile change is recorded", () => {
+  assert.equal(shouldInstall({ hasNodeModules: false, recordedHash: undefined, lockHash: "a" }), true);
+  assert.equal(shouldInstall({ hasNodeModules: true, recordedHash: undefined, lockHash: "a" }), false);
+  assert.equal(shouldInstall({ hasNodeModules: true, recordedHash: "a", lockHash: "a" }), false);
+  assert.equal(shouldInstall({ hasNodeModules: true, recordedHash: "a", lockHash: "b" }), true);
+});
+
+test("Noto Sans Mono installs into each platform's per-user font folder", () => {
+  assert.equal(userFontDir("darwin", "/Users/dev"), "/Users/dev/Library/Fonts");
+  assert.equal(userFontDir("linux", "/home/dev", {}), "/home/dev/.local/share/fonts");
+  assert.equal(userFontDir("linux", "/home/dev", { XDG_DATA_HOME: "/data" }), "/data/fonts");
+  for (const name of ["NotoSansMono[wdth,wght].ttf", "NotoSansMono-Regular.ttf", "Noto Sans Mono Bold.otf", "noto_sans_mono.ttc"]) {
+    assert.equal(isNotoSansMonoFile(name), true, name);
+  }
+  for (const name of ["NotoSans-Regular.ttf", "NotoSansMono.txt", "Menlo.ttc"]) assert.equal(isNotoSansMonoFile(name), false, name);
+});
+
+test("the Noto Sans Mono download is cached only when its SHA-256 matches", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "devrelay-font-"));
+  const cachePath = path.join(root, "fonts", "NotoSansMono.ttf");
+  const bytes = Buffer.from("font bytes");
+  const expectedSha256 = createHash("sha256").update(bytes).digest("hex");
+  let fetches = 0;
+  const fetchImpl = async () => { fetches += 1; return new Response(bytes); };
+  try {
+    await assert.rejects(
+      downloadVerifiedFont(cachePath, { expectedSha256, fetchImpl: async () => { fetches += 1; return new Response("tampered"); } }),
+      /SHA-256/
+    );
+    await assert.rejects(readFile(cachePath), { code: "ENOENT" });
+    await downloadVerifiedFont(cachePath, { expectedSha256, fetchImpl });
+    assert.deepEqual(await readFile(cachePath), bytes);
+    await downloadVerifiedFont(cachePath, { expectedSha256, fetchImpl });
+    assert.equal(fetches, 2);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
