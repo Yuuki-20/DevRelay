@@ -347,7 +347,8 @@ saveSettings.addEventListener("click", async () => {
     });
     settingsDirty = false;
     render(value);
-    settingsMessage.textContent = "Saved";
+    settingsMessage.textContent = "";
+    setSettingsOpen(false);
   } catch (error) {
     settingsMessage.textContent = error.message;
     settingsMessage.classList.add("error");
